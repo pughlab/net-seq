@@ -1,0 +1,4 @@
+loh	het
+neutral	chr1p36.33-p12, chr1q21.1-q21.2, chr1q21.2-q44, chr11p15.5-p11.2, chr11q11-q25, chr13, chr15q11.2-q24.2, chr15q24.3-q26.3, chr18, chr2p25.3-p11.2, chr2q11.1-q37.3, chr20, chr21, chr22, chr3, chr6p25.3-p21.32, chr6p21.32-p12.1, chr6q12-q27, chr8p23.3-p11.21, chr8q11.1-q24.3, chrX	chr1q21.1, chr1q21.2, chr10q11.22-q26.13, chr10q26.2-q26.3, chr15q11.1-q11.2, chr15q24.2-q24.3
+gain		chr1, chr10p15.3-q11.22, chr10q26.13-q26.2, chr11, chr12, chr14, chr16, chr17, chr19, chr2, chr20, chr21, chr4, chr5, chr6p21.32, chr6p11.2-p11.1, chr7, chr8, chr9, chrY
+loss	chr12	

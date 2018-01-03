@@ -33,7 +33,7 @@ snvs <- 0   #whether mutect SNVs are given
 min.depth <- 15   # minimum depth to consider a snp
 
 # Load the RData and functions
-load('~/git/net-seq/af_plotter/src/data/afPlotter.ref.Rdata') # Contains: clinvar.df, refgene.df, chrom.df
+load('~/git/net-seq/af_plotter/data/afPlotter.ref.Rdata') # Contains: clinvar.df, refgene.df, chrom.df
 source('~/git/net-seq/af_plotter/src/binProcess.R')
 source('~/git/net-seq/af_plotter/src/snvProcess.R')
 source('~/git/net-seq/af_plotter/src/snpProcess.R')
@@ -163,80 +163,4 @@ for(each.sample in 3:dim(sample.match.m)[1]){
                                  ebin.list=dna.af.list.bin, rbin.list=rna.af.list.bin,
                                  min.depth=15, filt.region=TRUE, 
                                  plot.bins=FALSE, plot.points=TRUE, bin.size=global.bin.size)
-
-  # ONLY set to true if dna_col = Tumor and rna_col = Normal
-  if(tumor.norm){
-    tumor.norm.df <- compareTumorNormal(dna.rna.list[['dna.bin']],
-                                        dna.rna.list[['rna.bin']],
-                                        plot.dens=TRUE, norm.process=NA, change=NA)
-    plotTumorNormDiff(tumor.norm.df)
-
-    if(purity.limit){
-      tn.purity <- list()
-      for(change.perc in seq(0,1, by=0.05)){
-        tumor.norm.df <- compareTumorNormal(dna.rna.list[['dna.bin']],
-                                            dna.rna.list[['rna.bin']],
-                                            plot.dens=TRUE, norm.process=NA, change=change.perc)
-        tn.purity[[as.character(change.perc)]] <- length(which(tumor.norm.df$pval.adj < 0.05))
-        plotTumorNormDiff(tumor.norm.df, change.perc)
-      }
-    }
-  }
-
-
-  #Generate Density plots for given CBS segments
-  if(purity.bins){
-    dna.ds.purity <- 'dna.bin'
-    rna.ds.purity <- 'rna.bin'
-    col.a.id <- 'mean.a'
-    col.b.id <- 'mean.b'
-  } else if(purity.points){
-    dna.ds.purity <- 'dna'
-    rna.ds.purity <- 'rna'
-    col.a.id <- 'a'
-    col.b.id <- 'b'
-  }
-
-  dna.lims <- plotDensityMin(paste(rownames(sample.match.m)[each.sample], ".dnaDens", sep=""),
-                             dna.rna.list[[dna.ds.purity]],
-                             col.a=col.a.id, col.b=col.b.id,
-                             quant=0.99, min.gen.frac=0.05)
-  rna.lims <- plotDensityMin(paste(rownames(sample.match.m)[each.sample], ".rnaDens", sep=""),
-                             dna.rna.list[[rna.ds.purity]],
-                             col.a=col.a.id, col.b=col.b.id,
-                             quant=0.99, min.gen.frac=0.05)
-
-  dna.decompose <- decomposeAfDist(dna.rna.list[[dna.ds.purity]], col.a=col.a.id, col.b=col.b.id)
-  rna.decompose <- decomposeAfDist(dna.rna.list[[rna.ds.purity]], col.a=col.a.id, col.b=col.b.id)
-
-  pdf(file.path(output.dir, "NETSEQ", "decomposeMixDist.pdf"))
-  plot(dna.decompose, main="Tumor mix")
-  grid()
-  legend("topright", lty=1, lwd=c(1, 1, 2), c("Original Distribution",
-                                              "Individual Fitted Distributions",
-                                              "Fitted Distributions Combined"),
-         col=c("blue", "red", rgb(0.2, 0.7, 0.2)), bg="white")
-  plot(rna.decompose, main="Normal mix")
-  grid()
-  legend("topright", lty=1, lwd=c(1, 1, 2), c("Original Distribution",
-                                              "Individual Fitted Distributions",
-                                              "Fitted Distributions Combined"),
-         col=c("blue", "red", rgb(0.2, 0.7, 0.2)), bg="white")
-  dev.off()
-  save(dna.rna.list, file="afBins.500kb.Rdata")
-  save(dna.af.list, file="dna_T.1xWGS.Rdata")
-  save(rna.af.list, file="dna_N.1xWGS.Rdata")
-
-
-  # Generate purity estimates by taking average of dist from 0,1
-  dna.pur.est <- (mean(c(abs(0.5 - dna.lims$lowerp), abs(dna.lims$upperp - 0.5))) * cn.stat) * 100  # cn.stat default is 2 for a ploidy of 2
-  rna.pur.est <- (mean(c(abs(0.5 - rna.lims$lowerp), abs(rna.lims$upperp - 0.5))) * cn.stat) * 100  # cn.stat default is 2 for a ploidy of 2
-  print(paste("Estimate DNA Purity: ", dna.pur.est, sep=""))
-  print(paste("Estimate RNA Purity: ", rna.pur.est, sep=""))
-
-  # Get the temporary purity to mark the lower limit of the LOH density peak
-  temp.dna.pur <- round(getPurityEstimate(dna.lims$upperq, type="alt"),3)
-  temp.rna.pur <- round(getPurityEstimate(rna.lims$upperq, type="alt"),3)
-
-
 }
