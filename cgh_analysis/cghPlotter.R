@@ -2,27 +2,29 @@ library(gtools)
 library(vcd)
 library(intervals)
 library(xtable)
+load("~/git/reference/cytoband/chr_cytoband.hg19.Rdata")
 
-hg19.cytoband <- read.csv("~/git/net-seq/ref/cytoband/cytoband.hg19.tsv", sep="\t", header=TRUE,
+hg19.cytoband <- read.csv("/Users/rquevedo/Desktop/cytoband.hg19.tsv", sep="\t", header=TRUE,
                           stringsAsFactors=FALSE, check.names=FALSE)
 colnames(hg19.cytoband)[1] <- 'chrom'
-load("~/git/net-seq/ref/cytoband/chr_cytoband.hg19.Rdata")
-load("~/git/net-seq/cgh_analysis/data/data.aggregateLoh.Rdata")  #PNETs, GINETs, CCL (T_2 only)
+load("/Users/rquevedo/git/reference/cytoband/chr_cytoband.hg19.Rdata")
+load("/Users/rquevedo/git/loh_cn_visualize/data/data.aggregateLoh.Rdata")  #PNETs, GINETs, CCL
 ucsc.chrom <- ucsc.chrom[order(ucsc.chrom$chr.num),]
 ucsc.chrom$mid.st <- ucsc.chrom$chr.st.size + (ucsc.chrom$size / 2)
-ucsc.chromInfo <- '~/git/net-seq/ref/cytoband/ucsc.hg19.chromInfo.txt'
-#load("~/git/net-seq/cgh_analysis/data/data.aggregateLoh.Rdata")  #PNETs, GINETs, CCL
-load("~/git/net-seq/cgh_analysis/data/otbData.aggregateLoh.medianLOH.Rdata")  # Filtered one
-dir.create("~/Desktop/net-seq/cgh_analysis/", recursive=TRUE, showWarnings = FALSE)
+ucsc.chromInfo <- '/Users/rquevedo/Desktop/bhk_lab/reference/ucsc.hg19.chromInfo.txt'
+#load("/Users/rquevedo/git/loh_cn_visualize/data/data.aggregateLoh.Rdata")  #PNETs, GINETs, CCL
+#load("/Users/rquevedo/git/shallowWgsCnv/data/otbData.aggregateLoh.medianLOH.Rdata")  # otb-PNET, otb-GINET
+#load("/Users/rquevedo/git/shallowWgsCnv/data/otbData.aggregateLoh.muLOH.Rdata")  # otb-PNET, otb-GINET
+load("/Users/rquevedo/Desktop/PughLab/NET-seq/otb_samples/net_OTB/plots/postPathBlacklisted/medLOHseg-0.25/otbData.aggregateLoh.medianLOH.Rdata")  # Filtered one
 
-source('~/git/net-seq/cgh_analysis/src/binCgh.R')
-source('~/git/net-seq/cgh_analysis/src/cnaPlot.R')
-source('~/git/net-seq/cgh_analysis/src/genomicCoord.R')
-source('~/git/net-seq/cgh_analysis/src/cytobandCoord.R')
-source('~/git/net-seq/cgh_analysis/src/binLoh.R')
-source("~/git/net-seq/cgh_analysis/src/annotateSeg.R")
+source('/Users/rquevedo/git/loh_cn_visualize/cgh_plotter/binCgh.R')
+source('/Users/rquevedo/git/loh_cn_visualize/cgh_plotter/cnaPlot.R')
+source('/Users/rquevedo/git/loh_cn_visualize/cgh_plotter/genomicCoord.R')
+source('/Users/rquevedo/git/loh_cn_visualize/cgh_plotter/cytobandCoord.R')
+source('/Users/rquevedo/git/loh_cn_visualize/cgh_plotter/binLoh.R')
+source("/Users/rquevedo/git/cn-annotater/src/annotateSeg.R")
 
-cgh.dir <- '~/git/net-seq/cgh_analysis/data/cgh_files/'
+cgh.dir <- '/Users/rquevedo/Desktop/PughLab/NET-seq/cgh_analysis/all/'
 setwd(cgh.dir)
 
 eval.netseq <- 1  # Add in NETSEQ dataset
@@ -65,7 +67,7 @@ t.genome.size <- t.genome.size + ucsc.chrom[t.genome.row, 'size']
 ### ---------------------------------------------------------------------------- ###
 if(eval.netseq == 1){
   ### Gets all Losses and Gains from Sequenza
-  net.seq.dir <- '~/git/net-seq/cgh_analysis/data/net_files'
+  net.seq.dir <- '/Users/rquevedo/Desktop/PughLab/NET-seq/Sequenza/all'
   
   loss.list <- list()
   gain.list <- list()
@@ -145,6 +147,7 @@ if(eval.netseq == 1){
   populated.interval <- collapseSegments(populated.interval,
                                          cn.stat=FALSE, group.collapse=TRUE,
                                          group.ids=c(names(disease.list[['otb-pnet']]), pnet.ids))
+  source("/Users/rquevedo/git/cn-annotater/src/annotateSeg.R")
   populated.interval <- annotateSeg(populated.interval,
                                     loc.headers=c("chr", "start.pos", "end.pos"))
   
@@ -157,12 +160,12 @@ if(eval.netseq == 1){
   het.genes <- mapGenes(populated.n1.interval)
   write.table(populated.n1.interval[,c("chrom", "loc.start", "loc.end", "PNETs_(n=17)", 
                                        names(disease.list[['otb-pnet']]), pnet.ids, 'gene')],
-              file="~/Desktop/net-seq/cgh_analysis/pnet_heterozygous_regions.n1collapse.txt", 
+              file="/Users/rquevedo/Desktop/pnet_heterozygous_regions.n1collapse.txt", 
               quote = FALSE, sep="\t", col.names=TRUE, row.names=FALSE, na = "")
   write.table(populated.interval[which(populated.interval$`PNETs_(n=17)` <= 1),
                                  c("chrom", "loc.start", "loc.end", "PNETs_(n=17)", 
                                    names(disease.list[['otb-pnet']]), pnet.ids, 'gene')],
-              file="~/Desktop/net-seq/cgh_analysis/pnet_heterozygous_regions.n1raw.txt", 
+              file="/Users/rquevedo/Desktop/pnet_heterozygous_regions.n1raw.txt", 
               quote = FALSE, sep="\t", col.names=TRUE, row.names=FALSE, na = "")
   
   populated.n.high.interval <- populated.interval[which(populated.interval$`PNETs_(n=17)` >= 13),]
@@ -175,10 +178,10 @@ if(eval.netseq == 1){
   loh.genes <- mapGenes(populated.n.high.interval)
   write.table(populated.n.high.interval[,c("chrom", "loc.start", "loc.end", "PNETs_(n=17)", 
                                        names(disease.list[['otb-pnet']]), pnet.ids, 'gene')],
-              file="~/Desktop/net-seq/cgh_analysis/pnet_heterozygous_regions.n.high.collapse.txt", 
+              file="/Users/rquevedo/Desktop/pnet_heterozygous_regions.n.high.collapse.txt", 
               quote = FALSE, sep="\t", col.names=TRUE, row.names=FALSE, na = "")
   
-  save(het.genes, loh.genes, file="~/Desktop/net-seq/cgh_analysis/NETseq_loh-het-genes.Rdata")
+  save(het.genes, loh.genes, file="/Users/rquevedo/Desktop/NETseq_loh-het-genes.Rdata")
   
   
   ### Formats the netseq.df to append to the main cgh.df
@@ -579,4 +582,4 @@ axis(2, at=seq(0, 1.5, by=0.5),
 close.screen(all.screens=TRUE)
 dev.off()
 
-save(cgh.df, file="~/Desktop/net-seq/cgh_analysis/cgh_df.RData")
+save(cgh.df, file="~/git/loh_cn_visualize/data/cgh_df.RData")

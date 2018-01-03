@@ -12,6 +12,19 @@
     * All arguments are hardcoded
 
 ### CGH Metaanalysis: cgh_analysis ###
+* **aggregateLoh.R**: Used to generate Figure 2, LOH plots for each sample coloured by copy-state, and to create the RData needed foer pancancer_loh.R
+    * Has 3 main inputs:
+    > data/otbData.aggregateLoh.medianLOH.Rdata: Contains copy-state and LOH status for PNETs and GINETs in validation cohort
+    >
+    > data/data.aggregateLoh.T2-1.Rdata: Contains copy-state and LOH status for PNETs and GINETs in discovery cohort
+    >
+    > disease.names:  Toggles the parameters between the discovery and validation cohorts for proper plotting
+    
+* **cghPlotter.R**:  Used to generate the figures for Supplementary Figure 5.  Clusters copy-number plots between CGH data and discovery+validation cohort as well as does a metaanalysis on features
+    * Assumes that the zipped tarball, cgh_files.tar.gz, is extracted into the folder data/cgh_files
+    * Assumes that the zipped tarball, net_files.tar.gz, is extracted into the folder data/net_files
+    * Runs interactively with a lot of parameters hardcoded and toggled for output
+    * Loads in the cgh files and net-seq files and runs a meta-analysis across all clusters
 
 ### AACR GENIE Purity Esimation: genie_analysis ###
 * **estSomPurity.R**: Main code used to analyze the GENIE Data
@@ -44,13 +57,17 @@
 
 ### TCGA Pancan LOH: pancan_loh ###
 * **pancancer_loh.R**: Orders and plots the LOH segments, coloured by copy-number as seen in Figure 1
+    * All parameters are hardcoded in the script
     * Input can be described as:
-> data/PNET_segments.txt: allele-specific copy-segments for all PNETS (discovery + validation)
->
-> data/PNET_segments.txt: allele-specific copy-segments for all GINETS (discovery + validation)
->
-> data/seg_meta_data.csv: ABSOLUTE calcualted allele-specific copy-number segs obtained from Carter et al., (doi:10.1038/nbt.2203)
+    > data/PNET_segments.txt: allele-specific copy-segments for all PNETS (discovery + validation)
+    >
+    > data/PNET_segments.txt: allele-specific copy-segments for all GINETS (discovery + validation)
+    >
+    > data/seg_meta_data.csv: ABSOLUTE calcualted allele-specific copy-number segs obtained from Carter et al., (doi:10.1038/nbt.2203)
 
 ### Shallow WGS LOH: shallow_wgs ###
+* First version of sWGS LOH calling, intended to run interactively with most parameters hardcoded
+* **generateReferenceCdf.R**: Used to generate the reference ECDF for the number of heterozygous SNPs within each bin based on the counts in normal samples
+* **physicalCoverageTCN.R**: Generates the sWGS plots seen in Supplementary Figure 3. Estimates the copy-state by depth-of-coverage based EM modelling paired with a quantile-based heterozygosity interpretation.
 
 

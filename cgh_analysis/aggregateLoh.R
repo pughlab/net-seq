@@ -16,17 +16,12 @@ library(intervals)
 ###############################
 #         Variables
 ###############################
-#save(ucsc.chrom, total.genome.size, file="/Users/rquevedo/git/loh_cn_visualize/data/chromInfo.Rdata")
-#load("/Users/rquevedo/git/shallowWgsCnv/data/otbData.aggregateLoh.medianLOH.Rdata")  # otb-PNET, otb-GINET
-#load("/Users/rquevedo/git/shallowWgsCnv/data/otbData.aggregateLoh.muLOH.Rdata")  # otb-PNET, otb-GINET
+load("~/git/net-seq/cgh_analysis/data/chromInfo.Rdata")
+#load("~/git/net-seq/cgh_analysis/data/otbData.aggregateLoh.medianLOH.Rdata")  # otb-PNET, otb-GINET
+load("~/git/net-seq/cgh_analysis/data/data.aggregateLoh.T2-1.Rdata") #PNETs, GINETs, CCL  (T_2 and T_1)
 
-load("/Users/rquevedo/git/loh_cn_visualize/data/chromInfo.Rdata")
-#load("/Users/rquevedo/Desktop/net_OTB/plots/otbData.aggregateLoh.medianLOH.Rdata")  # otb-PNET, otb-GINET
-#load("/Users/rquevedo/git/loh_cn_visualize/data/data.aggregateLoh.Rdata")  #PNETs, GINETs, CCL   (T_2 only)
-#load("~/git/loh_cn_visualize/data/data.aggregateLoh.T2-1.Rdata") #PNETs, GINETs, CCL  (T_2 and T_1)
-
+#disease.names <- c("otb-pnet", "otb-ginet")
 disease.names <- c("pnets", "sinets", "ccl")
-disease.names <- c("otb-pnet", "otb-ginet")
 total.disease.chr.list <- list()
 each.disease <- disease.names[2]
 dis.cn.pal <- c('white', 'dodgerblue', 'thistle','red') # CN = 0, CN = 1, CN = 2, CN = 3+ 
@@ -68,7 +63,8 @@ if(print.legend == 1){
 
 
 
-setwd('/Users/rquevedo/Desktop/')
+dir.create('~/Desktop/netseq/loh-cn', recursive = TRUE, showWarnings = FALSE)
+setwd('~/Desktop/netseq/loh-cn')
 pdf(paste("chr.", each.disease, ".pdf", sep=""))
 
 
