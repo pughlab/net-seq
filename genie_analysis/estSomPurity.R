@@ -153,12 +153,12 @@ source("~/git/net-seq/genie_analysis/src/afCalculation.R")
   }
   dev.off()
 }
+mut.snp.cnOV.split <- mut.snp.split
 net.identifiers <- data.frame("genie"=names(mut.snp.cnOV.split), 
                               "newid"=paste0("GENIE_Pnet_", c(1:length(mut.snp.split))))
 
 
 # Cycles through each sample and extracts the allelic fraction and identifiers for each
-mut.snp.cnOV.split <- mut.snp.split
 all.pur.est <- lapply(net.identifiers$newid, function(net.id){
   print(net.id)
   af.df <- mut.snp.cnOV.split[[net.identifiers[match(net.id, net.identifiers$newid),1]]]
