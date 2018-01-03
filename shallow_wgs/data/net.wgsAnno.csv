@@ -1,0 +1,32 @@
+sample_id,met.stat.id,met.stat,net.type.id,net.type
+NET-2-001a,M1,met,Pancreas,PNET
+NET-2-001b,M1,met,Tail of pancreas,PNET
+NET-2-002,M1,met,Pancreas,PNET
+NET-2-003,M1,met,Pancreas,PNET
+NET-2-004,M1,met,Terminal ileum,GINET
+NET-2-005,M1,met,Pancreas,PNET
+NET-2-006,M0,nonMet,Pancreas,PNET
+NET-2-007,M1,met,Small bowel,GINET
+NET-2-008,M1,met,Terminal ileum and cecum,GINET
+NET-2-009,M1,met,"small bowel, NOS",GINET
+NET-2-011,M0,nonMet,Pancreas,PNET
+NET-2-012,M0,nonMet,Pancreas,PNET
+NET-2-013,M1,met,Pancreas,PNET
+NET-2-014,M1,met,Pancreas,PNET
+NET-2-015,M1,met,Pancreas,PNET
+NET-2-016,M1,met,Small intestine,GINET
+NET-2-017,M0,nonMet,Pancreas,PNET
+NET-2-021,M1,met,Ileum,GINET
+NET-2-024,MP,NA,Ileum,GINET
+NET-2-025,M1,met,Pancreas,PNET
+NET-2-026,MP,NA,Antrum of stomach,GINET
+NET-2-027,M1,met,Ileum,GINET
+NET-2-028,M1,met,Pancreas,PNET
+NET-2-029,M0,nonMet,PANCREAS,PNET
+NET-2-030,M0,nonMet,Pancreas,PNET
+NET-2-031,M0,nonMet,Pancreatic - pancreas,PNET
+NET-2-032,M0,nonMet,Pancreatic,PNET
+NET-2-033,M1,met,small intestine - terminal ileum & right colon,GINET
+NET-2-034,M0,nonMet,pancreatic - body,PNET
+NET-2-036,M1,met,small bowel:Ileum,GINET
+NET-2-037,MP,NA,SMALL BOWEL- ILEUM,GINET
