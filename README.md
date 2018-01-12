@@ -2,7 +2,7 @@
 ## Publication Details ##
 * **paper**: Genome analysis and data sharing informs timing of molecular events in pancreatic neuroendocrine tumour
 * **authors**: Rene Quevedo, Anna Spreafico, Jeff Bruce, Arnavaz Danesh, Amanda Giesler, Youstina Hanna, Cherry Have, Tiantian Li, S.Y. Cindy Yang Tong Zhang, Sylvia L. Asa, Benjamin Haibe-Kains, Suzanne Kamel-Reid, Monika Krzyzanowska, Adam Smith, Simron Singh, Lillian L. Siu, Trevor J. Pugh
-* **publication**: Submitted to Cancer Discovery - January 2, 2018
+* **publication**: Submitted to Cancer Research - January 12, 2018
 
 ## Repo Details ##
 ### Allelic Fraction Plots: af_plotter ###
