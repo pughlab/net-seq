@@ -244,6 +244,9 @@ getShallowSnps <- function(x, targ.depth){
 # Returns:  Similar format to af.list, separated by chr
 binSnps <- function(af.list, shallow.wgs=FALSE, rm.hom=FALSE, ...){
   af.list[['chrX']] <- NULL
+  if(any(grepl("M", names(af.list), ignore.case = TRUE))){
+    af.list <- af.list[-grep("M", names(af.list), ignore.case = TRUE)]
+  }
   orig.af.name <- names(af.list)
   af.names <- gsub("^chr", "", names(af.list), ignore.case=TRUE)
   names(af.list) <- af.names
@@ -256,6 +259,7 @@ binSnps <- function(af.list, shallow.wgs=FALSE, rm.hom=FALSE, ...){
 
   
   bin.af.list <- lapply(af.names, function(each.chr){
+    print(each.chr)
     #Removes homozygous SNPs if true
     if(rm.hom){
       x.df <- af.list[[as.character(each.chr)]][which(as.numeric(as.character(af.list[[as.character(each.chr)]]$a)) > 0 &

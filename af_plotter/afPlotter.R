@@ -26,7 +26,7 @@ global.chrom <- c(1:22) # chromosome ID
 assembly <- 'GRCh37'  # GRCh37 or GRCh38
 purity.levels <- c(0.25, 0.50, 0.70, 0.80)
 cn.stat <- 2     # assumed copy-neutral ploidy for LOH segments, default = 2
-project.id <- 'netseq'
+project.id <- 'chan-adm'
 
 # Processing variables
 snvs <- 0   #whether mutect SNVs are given
@@ -97,7 +97,19 @@ if(project.id %in% 'netseq'){
   
   dir.create("~/Desktop/netseq/net_disc/output/", recursive = TRUE, showWarnings = FALSE)
   output.dir <- '~/Desktop/netseq/net_disc/output/'
-} 
+} else if(project.id %in% 'chan-adm'){
+  PDIR = '/mnt/work1/users/pughlab/projects/NET-SEQ/rna_seq_external/af_plots'
+  source(file.path(PDIR, "scripts", "plotAF.R"))
+  
+  rnaseq.vcf <- file.path(PDIR, "input")
+  exomeseq.vcf <- file.path(PDIR, "input")
+  output.dir <- file.path(PDIR, "output")
+  snvs <- 0   #whether mutect SNVs are given
+  
+  vcf.files <- list.files(rnaseq.vcf, "vcf$")
+  group1 <- data.frame("dna"=vcf.files,
+                       "rna"=vcf.files)
+}
 
 
 # Generate preliminary reference dataframes and genomic bins
@@ -109,7 +121,8 @@ chrom.bins.list <- generateGenomeBins(ucsc.chrom.df ,global.bin.size)
 ##### Processing the SNPs
 sample.match.m <- group1
 rownames(sample.match.m) <- gsub("\\..+", "", sample.match.m[,'dna'])
-for(each.sample in 3:dim(sample.match.m)[1]){
+rnasegs <- list()
+for(each.sample in 1:dim(sample.match.m)[1]){
   # Load in the SNPs from VCF and separate based on chromosome
   dna.af.list <- generateChrList(sample.match.m[each.sample,'dna'], exomeseq.vcf)
   rna.af.list <- generateChrList(sample.match.m[each.sample,'rna'], rnaseq.vcf)
@@ -148,12 +161,8 @@ for(each.sample in 3:dim(sample.match.m)[1]){
   
   #Bin the SNPs into x-sized genomic bins to accomodate for noise
   dna.af.list.bin <- binSnps(dna.af.list.ol, chrom.bins.list, rm.hom=FALSE, shallow.wgs=FALSE)
-  rna.af.list.bin <- binSnps(rna.af.list.ol, chrom.bins.list, rm.hom=FALSE, shallow.wgs=FALSE)
-  
-  #Bin the hetSNPs into x-sized genomic bins
-  dna.af.list.bin <- binSnps(dna.af.list.ol, chrom.bins.list, rm.hom=FALSE, shallow.wgs=FALSE)
-  rna.af.list.bin <- binSnps(rna.af.list.ol, chrom.bins.list, rm.hom=FALSE, shallow.wgs=FALSE)
-
+  rna.af.list.bin <- dna.af.list.bin
+  #rna.af.list.bin <- binSnps(rna.af.list.ol, chrom.bins.list, rm.hom=FALSE, shallow.wgs=FALSE)
 
   dir.create(file.path(output.dir, rownames(sample.match.m)[each.sample]), recursive=TRUE)
   setwd(file.path(output.dir, rownames(sample.match.m)[each.sample]))  
@@ -163,4 +172,16 @@ for(each.sample in 3:dim(sample.match.m)[1]){
                                  ebin.list=dna.af.list.bin, rbin.list=rna.af.list.bin,
                                  min.depth=15, filt.region=TRUE, 
                                  plot.bins=FALSE, plot.points=TRUE, bin.size=global.bin.size)
+  rnasegs[[rownames(sample.match.m)[each.sample]]] <- dna.rna.list[['dna.seg']]
 }
+
+save(rnasegs, file=file.path(output.dir, "rnasegs.RData"))
+
+rnasegs.df <- lapply(names(rnasegs), function(id) {
+  do.call("rbind", lapply(rnasegs[[id]], function(chr.m) {
+    chr.m$ID <- id
+    chr.m
+  }))
+})
+write.table(do.call("rbind", rnasegs.df), file=file.path(output.dir, "rnasegs.seg"),
+            sep="\t", quote = FALSE , col.names = TRUE, row.names = FALSE)

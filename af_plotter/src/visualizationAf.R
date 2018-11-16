@@ -10,10 +10,17 @@ plotAfExomeRna <- function(name="unlabelled", exome.list=list(), rna.list=list()
                            ebin.list=NULL, rbin.list=NULL,
                            min.depth=15, filt.region=FALSE, 
                            plot.bins=FALSE, plot.points=TRUE,
-                           max.snp.density=5, min.snp.density=0.05, bin.size=50000){
+                           max.snp.density=5, min.snp.density=0.05, bin.size=50000,
+                           plot.type='png'){
   ####################
   #### OUTPUT: Plot all Chr together
-  png(file=paste(name, ".min", paste=min.depth, ".allChr.png", sep=""), width=2000, height=1750, res=200)
+  require(scales)
+  if(plot.type=='png'){
+    png(file=paste(name, ".min", paste=min.depth, ".allChr.png", sep=""), width=2000, height=1750, res=200)
+  } else if(plot.type=='pdf'){
+    pdf(file=paste(name, ".min", paste=min.depth, ".allChr.pdf", sep=""))
+  }
+  
   layout(matrix(c(seq(1:(length(exome.list) + 2)), 
                   (seq(1:(length(exome.list) + 2)) + (length(exome.list) + 2))), nrow=2, byrow=T))
   rna.exome.list <- list(exome.list, rna.list)
@@ -38,11 +45,13 @@ plotAfExomeRna <- function(name="unlabelled", exome.list=list(), rna.list=list()
       plot(x=conf.chr.df$pos,
            y=conf.chr.df$a,
            ylim=c(0,1),
-           col=alpha("black", 0.5),,
+           col=alpha("black", alpha=0.5),
+           pch=16,
            yaxt='n', xaxt='n')
       points(x=conf.chr.df$pos,
              y=conf.chr.df$b,
-             col=alpha("grey", 0.5))
+             pch=16,
+             col=alpha("grey", alpha=0.5))
       
       rect(par("usr")[1],par("usr")[3],par("usr")[2],0,col = alpha("grey", 0.6))
       if(chr.col.cnt %% 2 == 1){
@@ -69,8 +78,13 @@ plotAfExomeRna <- function(name="unlabelled", exome.list=list(), rna.list=list()
   rna.seg <- list() # List contain all AF segments called by CBS for RNA
   chr.col.cnt <- 1
   for(each.chr in chr.num){
-    png(file=paste(name, ".min", paste=min.depth, ".", each.chr, ".png", sep=""), 
-        width=2000, height=1750, res=200)
+    if(plot.type=='png'){
+      png(file=paste(name, ".min", paste=min.depth, ".", each.chr, ".png", sep=""), 
+          width=2000, height=1750, res=200)
+    } else if(plot.type=='pdf'){
+      pdf(file=paste(name, ".min", paste=min.depth, ".", each.chr, ".pdf", sep=""))
+    }
+    
     layout(matrix(c(0,0,4,4,4,4,9,9,9,9,0,0,
                     0,0,4,4,4,4,9,9,9,9,0,0,
                     0,0,3,3,3,3,8,8,8,8,0,0,
