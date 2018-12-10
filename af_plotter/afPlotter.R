@@ -20,7 +20,7 @@ tumor.norm <- FALSE   # If tumor and normal are given, and bins are computed, fi
 purity.limit <- FALSE  # If ydiscovering the lower purity limit is of interest
 purity.bins <- TRUE
 purity.points <-FALSE
-rm.x <- TRUE
+rm.x <- FALSE
 global.bin.size <- 50000  # genomic bin size
 global.chrom <- c(1:22) # chromosome ID
 assembly <- 'GRCh37'  # GRCh37 or GRCh38
@@ -161,8 +161,8 @@ for(each.sample in 1:dim(sample.match.m)[1]){
   
   #Bin the SNPs into x-sized genomic bins to accomodate for noise
   dna.af.list.bin <- binSnps(dna.af.list.ol, chrom.bins.list, rm.hom=FALSE, shallow.wgs=FALSE)
-  rna.af.list.bin <- dna.af.list.bin
-  #rna.af.list.bin <- binSnps(rna.af.list.ol, chrom.bins.list, rm.hom=FALSE, shallow.wgs=FALSE)
+  #rna.af.list.bin <- dna.af.list.bin
+  rna.af.list.bin <- binSnps(rna.af.list.ol, chrom.bins.list, rm.hom=FALSE, shallow.wgs=FALSE)
 
   dir.create(file.path(output.dir, rownames(sample.match.m)[each.sample]), recursive=TRUE)
   setwd(file.path(output.dir, rownames(sample.match.m)[each.sample]))  

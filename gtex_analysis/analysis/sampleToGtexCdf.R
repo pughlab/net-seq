@@ -10,9 +10,20 @@
 #######        : FPKM and TPM matrices assembled by Rene
 #################################################
 args <- commandArgs(TRUE)
-sample.tpm <- args[1]   # Rdata dataframe of tpm, sample x tracking_id
-goi.txt <- args[2]      # Genes of interest
-outdir <- args[3]      # Genes of interest
+sample.mut <- args[1]   # Rdata dataframe of tpm, sample x tracking_id
+sample.wt <- args[2]   # Rdata dataframe of tpm, sample x tracking_id
+goi.txt <- args[3]      # Genes of interest
+outdir <- args[4]      # Genes of interest
+
+if(length(args)==0){
+  PDIR='/mnt/work1/users/pughlab/projects/NET-SEQ/rna_seq_external/gtex/sampleToGtexCdf'
+  
+  sample.mut=file.path(PDIR, "input", "pnet-mutMAD.Rdata")
+  sample.wt=file.path(PDIR, "input", "pnet-wtMAD.Rdata")
+  outdir <- file.path(PDIR, "output")
+  goi.v <- c("DNMT1", "CCNE1", "CCNE2", "SOX2", "CDKN1B", "CDKN1A", "MEN1", "CCND1", "CDK2", "CDK4", "RB1", "CTNNB1", "DAXX", "ATRX")
+}
+
 
 # Temporary GTEx Source Files
 source('~/git/net-seq/gtex_analysis/src/tpmPreprocess.R')
@@ -27,15 +38,16 @@ all.tissues <- read.table(all.tissue.id, header=FALSE, stringsAsFactors=FALSE, c
 load(master.annotation.file)
 
 # Compare each sample in sample.tpm to each tissue sample in tpm.tissue.list
-load(sample.tpm)
-sample.mat <- tpm.mat
+load(sample.mut); sample.mut <- tpm.mat
+load(sample.wt); sample.wt <- tpm.mat
 goi.v <- read.table(goi.txt, header=FALSE, check.names=FALSE, stringsAsFactors=FALSE)$V1
 # Creates a list of TPM matrices given a list of tissues of interest and extracts only the given gene
 tpm.tissue.list <- splitTissueTpm(all.tissues=all.tissues$V1)
 
 # Convert the genes of interest to tracking_ids and subsets matrices based on this
 #goi.v <- c("DNMT1", "CCNE1", "CCNE2", "SOX2", "CDKN1B", "CDKN1A", "MEN1", "CCND1", "CDK2", "CDK4", "RB1", "CTNNB1", "DAXX", "ATRX")
-goi.tracking_id.v <- sapply(goi.v, function(gene.name) getId(gene.name, id.type='hugo', global.anno.df=global.anno.df))
+#goi.tracking_id.v <- sapply(goi.v, function(gene.name) getId(gene.name, id.type='hugo', global.anno.df=global.anno.df))
+goi.tracking_id.v <- getId(goi.v, id.type='hugo', global.anno.df=global.anno.df)
 names(goi.tracking_id.v) <- goi.v
 
 
@@ -59,23 +71,36 @@ for(each.goi.num in c(1:length(goi.tracking_id.v))){
   })
   
   # Isolate the tumor sample expression percentile in comparison to GTEx Tissue/gene ECDF
-  sample.subset.mat <- sample.mat[which(rownames(sample.mat) %in% each.goi),,drop=FALSE]
-  sample.subset.mat <- sample.subset.mat[match(each.goi, rownames(sample.subset.mat)),,drop=FALSE]
-  tissue.ecdf.list <- lapply(tpm.tissue.subset.ecdf, function(each.ecdf) {
-    ecdf.sample.mat <- each.ecdf[['ecdf']](sample.subset.mat)
-    names(ecdf.sample.mat) <- colnames(sample.subset.mat)
-    return(ecdf.sample.mat)
+  sample.stats <- lapply(list("mut"=sample.mut, 
+                              "wt"=sample.wt), function(sample.mat){
+    sample.subset.mat <- sample.mat[which(rownames(sample.mat) %in% each.goi),,drop=FALSE]
+    sample.subset.mat <- sample.subset.mat[match(each.goi, rownames(sample.subset.mat)),,drop=FALSE]
+    tissue.ecdf.list <- lapply(tpm.tissue.subset.ecdf, function(each.ecdf) {
+      ecdf.sample.mat <- each.ecdf[['ecdf']](sample.subset.mat)
+      names(ecdf.sample.mat) <- colnames(sample.subset.mat)
+      return(ecdf.sample.mat)
     })
-  
-  
-  # Append the list containing all the Percentile values and 95% CI values
-  ecdf.list[[goi.hugo]] <- tissue.ecdf.list[order(sapply(tissue.ecdf.list, median))]
-  ci95.list[[goi.hugo]] <- lapply(tpm.tissue.subset.ecdf[order(sapply(tissue.ecdf.list, median))],
-                                  function(x) x[['ci95']])
+    
+    
+    # Append the list containing all the Percentile values and 95% CI values
+    ecdf <- tissue.ecdf.list[order(sapply(tissue.ecdf.list, median))]
+    ci95 <- lapply(tpm.tissue.subset.ecdf[order(sapply(tissue.ecdf.list, median))],
+                   function(x) x[['ci95']])
+    
+    list('ecdf'=ecdf,'ci'=ci95)
+  })
+  mut.stats <- lapply(sample.stats[['mut']], function(x) round(do.call("rbind", x),3))
+  wt.stats <- lapply(sample.stats[['wt']], function(x) round(do.call("rbind", x),3))
+  ecdf.list[['mut']][[goi.hugo]] <- mut.stats[['ecdf']]
+  ci95.list[['mut']][[goi.hugo]] <- mut.stats[['ci']]
+  ecdf.list[['wt']][[goi.hugo]] <- wt.stats[['ecdf']]
+  ci95.list[['wt']][[goi.hugo]] <- wt.stats[['ci']]
 }
 
 
-
+lapply(ecdf.list, function(gene){
+  do.call("rbind", gene)
+})
 #Generate histology subtype-type index
 sra.ord.idx <- sra.dict[with(sra.dict, order(body.site, histology)), ]
 sra.ord.idx <- unique(sra.ord.idx[,c("body.site", "histology")])
