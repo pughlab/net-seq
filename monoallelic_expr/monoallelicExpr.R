@@ -9,7 +9,7 @@ load(file.path(script.dir, "NETseq_loh-het-genes.Rdata"))
 
 #### PARAMETERS ####
 max.frac.NA.samples <- 0.25  # max fraction of samples to have no read coverage
-ordering <- FALSE # boolean whether to order genes based on AF
+ordering <- TRUE # boolean whether to order genes based on AF
 AF.threshold <- 0.8 # Allelic imbalance threshold where 95% of data must be above
 min.snps <- 1
 min.samples <- 0.50 # Min fraction of samples to needed to evaluate MAE
@@ -92,14 +92,14 @@ combine.pval <- function(p.mat, resample='resample', resampling.quantile=0.99){
 
 # Given a matrix of imbalance p-values and the AF per gene, this calculates the
 # combined p-value and FDR adjustment
-allelicImbalance <- function(p.mat, af.mat){
+allelicImbalance <- function(p.mat, af.mat, q=0.05){
   aggregate.pval <- combine.pval(p.mat, resample='resample', resampling.quantile=0.99)
   qval <- p.adjust(aggregate.pval, n = length(aggregate.pval),
                    method='fdr')
   
   #From the significant gene list, remove genes where not
   # enough samples had a value
-  q.genes <- sort(qval[which(qval < 0.05)], decreasing=TRUE)
+  q.genes <- sort(qval[which(qval <= q)], decreasing=TRUE)
   non.na.cnt <- apply(p.mat[,names(q.genes)], 2, function(x) sum(!is.na(x)))
   powered.genes <- non.na.cnt > (min.samples * nrow(p.mat))
   q.genes <- q.genes[which(powered.genes)]
@@ -140,6 +140,22 @@ mapMatrices <- function(het.mat, r.idx){
        "p"=out.pval.mat)
 }
 
+# Given  a matrix of AF with columns as genes, it calculates the mean AF
+# weighted by the number of samples that have coverage
+rankWeightedAF <- function(af.mat, p=1, top.q=0.95){
+  # Weight = number of samples with non NA gene expression
+  gene.af <- apply(af.mat, 2, function(x){
+    mean(x, na.rm=TRUE) * (p * length(which(!is.na(x))))
+  })
+  order.af <- order(gene.af, decreasing = TRUE)
+  top.genes <- sort(gene.af[which(gene.af > quantile(gene.af, top.q, na.rm=TRUE))], 
+                    decreasing = TRUE)
+  
+  list("af"=gene.af, "order"=order.af, "top"=top.genes)
+}
+
+# Print a vector for copy/paste into Enrichr
+catGenes <- function(x) { cat(paste0(x, "\n")) }
 
 #### Load Data ####
 MAD <- read.table(MAD.samples, header=FALSE,
@@ -251,10 +267,10 @@ ginet.idx <- which(rownames(all.het.mat) %in% ginets)
 
 # Flag Allelicc imbalancebased on high AF
 max.num.NA.samples <- ceiling(nrow(all.het.mat) * max.frac.NA.samples)
-hom.na.idx <- apply(pnet.het.mat, 2, function(x){
-  (sum(is.na(x)) <= max.num.NA.samples) && 
-    (quantile(na.omit(x),0.05) > AF.threshold)
-} )
+# hom.na.idx <- apply(pnet.het.mat, 2, function(x){
+#   (sum(is.na(x)) <= max.num.NA.samples) && 
+#     (quantile(na.omit(x),0.05) > AF.threshold)
+# } )
 # pnet.het.mat[,which(na.idx)]
 # round(pnet.het.mat[,which(hom.na.idx), drop=FALSE],2)
 
@@ -267,67 +283,87 @@ ginet <- mapMatrices(all.het.mat, ginet.idx)
 
 
 ## Get significantly imbalanced genes and apply FDR correction
-pnet.q <- allelicImbalance(p.mat=pnet[['p']], af.mat=pnet[['AF']])
-ginet.q <- allelicImbalance(p.mat=ginet[['p']], af.mat=ginet[['AF']])
+pnet.q <- allelicImbalance(p.mat=pnet[['p']], af.mat=pnet[['AF']], q=0.25)
+ginet.q <- allelicImbalance(p.mat=ginet[['p']], af.mat=ginet[['AF']], q=0.25)
 
-q.pnets <- names(pnet.q[['sig.q']])
-round(pnet.q[['q']][q.pnets] / ginet.q[['q']][q.pnets])
+## Overlap imbalanced genes with weighted mean AF rank
+p.rank.af <- rankWeightedAF(pnet[['AF']], p=1, top=0.95)
+g.rank.af <- rankWeightedAF(ginet[['AF']], p=1)
 
-catGenes <- function(x) { cat(paste0(x, "\n")) }
-p.sigq <-names(pnet.q[['sig.q']]) 
-g.sigq <- names(ginet.q[['sig.q']])
-catGenes(setdiff(p.sigq, g.sigq))
-catGenes(setdiff(g.sigq, p.sigq))
-catGenes(intersect(p.sigq, g.sigq))
+p.sigq <- intersect(names(pnet.q[['sig.q']]), names(p.rank.af[['top']]))
+g.sigq <- intersect(names(ginet.q[['sig.q']]), names(g.rank.af[['top']]))
 
-#### OPTIONAL: Order on most unbalanced AF ####
+pdf(file.path(pdir, "output", "overlap_pnetMAD.pdf"))
+v <- venn.diagram(list(mad.p=p.sigq, mad.n=g.sigq),
+                  fill = c("orange", "blue"),
+                  alpha = c(0.5, 0.5), cat.cex = 1.5, cex=1.5,
+                  filename=NULL)
+grid.newpage()
+grid.draw(v)
+dev.off()
+
+catGenes(setdiff(p.sigq, g.sigq)) ## MAD+ Genes
+catGenes(setdiff(g.sigq, p.sigq)) ## MAD- Genes
+catGenes(intersect(p.sigq, g.sigq)) ## MAD indepedent genes
+
+#### OPTIONAL/VISUALIZATION: Ordered by most unbalanced AF ####
 if(ordering){
   # Take the average weighted by the number of samples with values; order by that
-  gene.af <- apply(pnet.het.mat, 2, function(x) mean(x, na.rm=TRUE) * length(which(!is.na(x))))
-  gene.ord <- order(gene.af, decreasing = TRUE)
-  
-  pnet.het.mat <- pnet.het.mat[,gene.ord]
-  pnet.snps.per.gene <- pnet.snps.per.gene[,gene.ord]
-  pnet.cov.per.gene <- pnet.cov.per.gene[,gene.ord]
-  save(pnet.het.mat, pnet.snps.per.gene, 
-       pnet.cov.per.gene, pnet.gene.pos.mat,
+  save(all.het.mafs.avg.af,
        file=file.path(pdir, "output", "pnet_het_snps.Rdata"))
-}
-
-#### VISUALIZATION: Ordered by imbalance ####
-if(ordering){
-  non.na.idx <- apply(pnet.het.mat, 2, function(x) sum(is.na(x)) <= max.num.NA.samples)
-  pdf(file.path(pdir, "output", "pnet-het-retained.pdf"), width=50)
-  split.screen(c(3, 1))
-  plotMat(pnet.het.mat[,non.na.idx], "", ylab="Alt Allele Fraction", c(1, 4.1, 4.1, 2.1), 1, 1)
-  plotMat(pnet.snps.per.gene[,non.na.idx], "", ylab="Snps per gene", c(0.5, 4.1, 0.5, 2.1), 2, 50)
-  plotMat(pnet.cov.per.gene[,non.na.idx], "", ylab="Cov per gene", c(5.1, 4.1, 0.5, 2.1), 3, 100)
-  axis(side = 1, at=seq(1:length(which(non.na.idx))),
-       labels = colnames(pnet.het.mat)[non.na.idx], las=2, cex.axis=0.5)
-  close.screen(all.screens=TRUE)
   
-  dev.off()
+  for(ord.type in c('rank', 'sig', 'rank.sig')){
+    switch(ord.type, 
+           rank=gene.ord <- p.rank.af[['order']],  # All rank-based
+           sig=gene.ord <-  match(names(pnet.q[['sig.q']]), colnames(pnet[['AF']])),  # All significant/powered
+           rank.sig=gene.ord <-  match(p.sigq, colnames(pnet[['AF']]))  # Rank based + significant/powered
+    )
+    gene.ord <- head(gene.ord, 50)
+    
+    pnet.het.mat <- pnet[['AF']][,gene.ord]
+    pnet.snps.per.gene <- pnet[['Snps']][,gene.ord]
+    pnet.cov.per.gene <- pnet[['Cov']][,gene.ord]
+    non.na.idx <- apply(pnet.het.mat, 2, function(x) sum(is.na(x)) <= max.num.NA.samples)
+
+    pdf(file.path(pdir, "output", paste0("pnet-het-retained.", ord.type, ".pdf")), width=15)
+    split.screen(c(3, 1))
+    plotMat(pnet.het.mat[,non.na.idx], "", ylab="Alt Allele Fraction", c(1, 4.1, 4.1, 2.1), 1, 1)
+    plotMat(pnet.snps.per.gene[,non.na.idx], "", ylab="Snps per gene", c(0.5, 4.1, 0.5, 2.1), 2, 50)
+    plotMat(pnet.cov.per.gene[,non.na.idx], "", ylab="Cov per gene", c(5.1, 4.1, 0.5, 2.1), 3, 100)
+    axis(side = 1, at=seq(1:length(which(non.na.idx))),
+         labels = colnames(pnet.het.mat)[non.na.idx], las=2, cex.axis=0.5)
+    close.screen(all.screens=TRUE)
+    dev.off()
+  }
+  
 }
 
 #### VISUALIZATION: Ordered by genomic coord context ####
-non.na.idx <- apply(pnet.het.mat, 2, function(x) sum(is.na(x)) <= max.num.NA.samples)
-
-
+non.na.idx <- apply(pnet[['AF']], 2, function(x) sum(is.na(x)) <= max.num.NA.samples)
 
 to.df <- function(x){ data.frame(as.matrix(t(x)), stringsAsFactors=FALSE)  }
-pos.mat <- to.df(pnet.gene.pos.mat)
+pos.mat <- to.df(all.pos.mat)
 pos.split <- split(pos.mat, f=pos.mat$chr)
-pval.split <- split(to.df(pnet.pval.mat), f=pos.mat$chr)
-af.split <- split(to.df(pnet.het.mat), f=pos.mat$chr)
-snps.split <- split(to.df(pnet.snps.per.gene), f=pos.mat$chr)
-cov.split <- split(to.df(pnet.cov.per.gene), f=pos.mat$chr)
+
+splitNetMatrix <- function(mat, ref, f){
+  df <- to.df(mat)
+  df <- df[match(ref, rownames(df)),]
+  rownames(df) <- ref
+  
+  split(df[match(ref, rownames(df)),], f)
+}
+pval.split <- splitNetMatrix(mat=pnet[['p']], ref=rownames(pos.mat), f=pos.mat$chr)
+af.split <- splitNetMatrix(mat=pnet[['AF']], ref=rownames(pos.mat), f=pos.mat$chr)
+snps.split <- splitNetMatrix(mat=pnet[['Snps']], ref=rownames(pos.mat), f=pos.mat$chr)
+cov.split <- splitNetMatrix(mat=pnet[['Cov']], ref=rownames(pos.mat), f=pos.mat$chr)
 
 pdf(file.path(pdir, "output", "pnet-het-retained.genomic.pdf"), height=20, width=15)
 chr.ids <- names(af.split)[order(as.numeric(names(af.split)))]
 split.screen(c(length(chr.ids), 1))
 lapply(chr.ids, function(each.chr){
   pos <- as.numeric(as.character(pos.split[[each.chr]]$start.pos))
-  mu <- apply(af.split[[each.chr]], 1, mean, na.rm=TRUE)
+  mu <- apply(af.split[[each.chr]], 1, mean, na.rm=TRUE)  # Mean of gene AF
+  #mu <- apply(af.split[[each.chr]], 1, median, na.rm=TRUE)  # Median of gene AF
   sd <- apply(af.split[[each.chr]], 1, sd, na.rm=TRUE)
   sd[is.na(sd)] <- 0.5
   n <- apply(pval.split[[each.chr]], 1, function(x) sum(!is.na(x))) 
@@ -344,46 +380,22 @@ lapply(chr.ids, function(each.chr){
            col=alpha("grey", (alpha.frac)))
   points(x=pos, y=mu, pch=16, cex=(1 + alpha.frac^2),
          col=alpha("gray20", (alpha.frac)))
-  qval.chr <- qval[match(names(mu), names(qval))]
-  qval.chr[(qval.chr > 0.05) | is.na(qval.chr)] <- 1
-  q.pos <- which(qval.chr < 0.05)
+
+  psig.mu <- p.sigq[p.sigq %in% names(mu)]
+  qval.chr <- pnet.q[['sig.q']][psig.mu]
+  q.pos <- match(psig.mu, names(mu))
   if(length(q.pos)>0){
-    points(x=pos, y=mu, pch=16, cex=(1 + alpha.frac^2),
-           col=alpha("red", (1-qval.chr)))
-    text(x=pos[q.pos], y=mu[q.pos], labels = names(mu)[q.pos], pos = 3, cex=0.85)
+    ord <- order(pos[q.pos])
+    points(x=pos[q.pos][ord], y=mu[q.pos][ord], pch=16, cex=(1 + alpha.frac[ord]^2),
+           col=alpha("red", (1-qval.chr[ord])))
+    text(x=pos[q.pos][ord], y=rep(c(0.48, 0.9), length(q.pos))[1:length(q.pos)], 
+         labels = names(mu)[q.pos][ord], pos = 3, cex=0.8, col="red")
   }
 })
 close.screen(all.screens = TRUE)
 dev.off()
 
-library(beeswarm)
-library(ggplot2)
-library(reshape2)
-
-non.q.genes <- qval[which(qval > 0.5)][1:length(q.genes)]
-non.q.genes.af <- round(pnet.het.mat[,names(non.q.genes)], 3)
-
-pdf(file.path(pdir, "output", "pnet-het-retained.qgenes.pdf"), height=5, width=10)
-m.af <- melt(q.genes.af)
-colnames(m.af) <- c("Sig_Genes", "Allelic_Fraction")
-ggplot(m.af, aes(x=Sig_Genes, y=Allelic_Fraction)) + 
-  geom_violin(trim=FALSE) + 
-  ylim(0.5, 1.0) +
-  geom_jitter(shape=16, position=position_jitter(0.2), alpha = 0.7) +
-  theme(axis.text.x = element_text(angle = 90, hjust = 1))
 
 
-non.m.af <- melt(non.q.genes.af)
-colnames(non.m.af) <- c("Non_Sig_Genes", "Allelic_Fraction")
-ggplot(non.m.af, aes(x=Non_Sig_Genes, y=Allelic_Fraction)) + 
-  geom_violin(trim=FALSE) + 
-  ylim(0.5, 1.0) +
-  geom_jitter(shape=16, position=position_jitter(0.2), alpha = 0.7) +
-  theme(axis.text.x = element_text(angle = 90, hjust = 1))
-# ggplot(melt(-log10(q.genes.pval)), aes(x=variable, y=value), log10="y") + 
-#   ylim(0, 100) +
-#   geom_jitter(shape=16, position=position_jitter(0.2), alpha = 0.7) +
-#   theme(axis.text.x = element_text(angle = 90, hjust = 1))
-dev.off()
 
-cat(paste0(names(q.genes), "\n"))
+
