@@ -1,6 +1,7 @@
 library(plyr)
 library(scales)
 library(survcomp)
+library(VennDiagram)
 pdir <- '/mnt/work1/users/pughlab/projects/NET-SEQ/rna_seq_external/MAE'
 script.dir <- '/mnt/work1/users/home2/quever/git/loh_cn_visualize/data'
 MAD.samples <- file.path(pdir, "samples", "samples_MAD-netseq.txt")
@@ -11,9 +12,9 @@ load(file.path(script.dir, "NETseq_loh-het-genes.Rdata"))
 max.frac.NA.samples <- 0.25  # max fraction of samples to have no read coverage
 ordering <- TRUE # boolean whether to order genes based on AF
 AF.threshold <- 0.8 # Allelic imbalance threshold where 95% of data must be above
-min.snps <- 1
+min.snps <- 2
+min.depth <- 10  # 1 - pbinom(3,4,0.44) is the min to get 0.05 pval
 min.samples <- 0.50 # Min fraction of samples to needed to evaluate MAE
-min.depth <- 4  # 1 - pbinom(3,4,0.44) is the min to get 0.05 pval
 mad.multiplier=4 # Removes SNPs with coverage > median + 4MAD per gene
 exp.hom.frac=0.44 # Estimate based on  https://doi.org/10.1371/journal.pgen.1000160
 use.af=TRUE  # Assigns HOM/HET based on alleic fractions
@@ -121,7 +122,8 @@ mapMatrices <- function(het.mat, r.idx){
                                            colnames(snps.per.gene.mat),
                                            colnames(het.mat),
                                            colnames(cov.mat),
-                                           colnames(pval.mat)))
+                                           colnames(pval.mat),
+                                           colnames(ks.mat)))
   gene.pos.mat <- all.pos.mat[,gene.intersect]
   genomic.order <- order(as.numeric(gene.pos.mat['chr',]),
                          as.numeric(gene.pos.mat['start.pos',]))
@@ -133,11 +135,14 @@ mapMatrices <- function(het.mat, r.idx){
   out.cov.per.gene <- cov.mat[r.idx,gene.intersect]
   out.het.mat <- het.mat[r.idx,gene.intersect]
   out.pval.mat <- pval.mat[r.idx,gene.intersect]
+  out.ks.mat <- ks.mat[r.idx,gene.intersect]
+  
   
   list("Snps"=out.snps.per.gene,
        "Cov"=out.cov.per.gene,
        "AF"=out.het.mat,
-       "p"=out.pval.mat)
+       "p"=out.pval.mat,
+       'ks'=out.ks.mat)
 }
 
 # Given  a matrix of AF with columns as genes, it calculates the mean AF
@@ -168,6 +173,8 @@ pnets <- MAD[!MAD %in% ginets]
 setwd(pdir)
 
 #### Parse MAF File ####
+all.het.mafs.avg.af.snp1 <- all.het.mafs.avg.af
+all.het.mafs.avg.af.snp2 <- all.het.mafs.avg.af
 all.het.mafs.avg.af <- lapply(list.files(file.path(pdir, "maf")), 
                               function(each.file){
   each.maf <- read.table(file.path(pdir, "maf", each.file), header=TRUE, 
@@ -179,7 +186,16 @@ all.het.mafs.avg.af <- lapply(list.files(file.path(pdir, "maf")),
     het.maf <- het.maf[order(het.maf$Hugo_Symbol),]
     het.maf.per.gene <- split(het.maf, f=het.maf$Hugo_Symbol)
     
-    # Calculates descriptivestats: number of snps per gene
+    # Removes intronic and UTR genes with low coverage due to isoform mapping issues
+    het.maf.per.gene.filt <- lapply(het.maf.per.gene, function(gene){
+      low.depth <- with(gene, read_depth < min.depth)
+      premrna.snp <- gene$Variant_Classification %in% c("5UTR", "3UTR", "Intron")
+      rm.rows <- which(premrna.snp & low.depth)
+      if(length(rm.rows) > 0) gene[-rm.rows,] else gene
+    })
+    het.maf.per.gene <- het.maf.per.gene.filt
+    
+    # Calculates descriptive stats: number of snps per gene
     snps.per.gene <- sapply(het.maf.per.gene, nrow)
     tbl.snps <- t(table(snps.per.gene))
     tbl.snps.per.gene <- t(snps.per.gene)
@@ -196,8 +212,56 @@ all.het.mafs.avg.af <- lapply(list.files(file.path(pdir, "maf")),
     # Calculates a rough average allelic fraction per gene
     het.maf.per.gene <- het.maf.per.gene[snp.cov.filt]
     het.mafs.avg.af <- sapply(het.maf.per.gene, function(x) mean(x$allele_frequency))
-    het.mafs.avg.af <- t(het.mafs.avg.af)
+    het.mafs.avg.af <- t(het.mafs.avg.af)  # Uses oncotoators 0.5 and 1.0 annotation
     
+    # Calculates a depth based average allelic fraction per gene
+    het.mafs.avg.actual.af <- sapply(het.maf.per.gene, function(x){
+      cnt <- lapply(x$allelic_depth, function(i) as.numeric(strsplit(i, ",")[[1]]))
+      cnt <- as.numeric(sapply(cnt, function(i) i[which.max(i)]))
+      af <- round(cnt/x$read_depth, 2)
+      mean(af)
+    })
+    het.mafs.avg.actual.af <- t(het.mafs.avg.actual.af) 
+    
+    # Calculates continuous AF and binomial p values
+    y <- lapply(het.maf.per.gene, function(x, filter=NA, verbose=FALSE){
+      # Get alt/ref allele depth
+      cnt <- lapply(x$allelic_depth, function(i) as.numeric(strsplit(i, ",")[[1]]))
+      cnt <- as.numeric(sapply(cnt, function(i) i[which.max(i)]))
+      af <- round(cnt/x$read_depth, 2)
+      if(any(is.na(cnt))){
+        cnt[is.na(cnt)] <- 0
+        af[is.na(af)] <- 1
+      } 
+
+      res <- data.frame("class"=as.character(x$Variant_Classification),
+                        "alt"=cnt, "depth"=as.numeric(x$read_depth),
+                        "af"=af, stringsAsFactors = FALSE)
+      res$P <- round(with(res, (depth-alt) / depth), 3)
+      if(any(res$P == 0)) res$P[res$P == 0] <- 0.001
+      res$RR <- with(res, P/0.5)
+      if(any(res$RR > 1)) res$RR[res$RR > 1] <- 1
+      res$logRR <- with(res, (-1 * log(RR)) + 1) 
+      
+      res$p <- with(res, 1 - pbinom(alt-1, depth, prob = 0.5))
+      res$logp <- -1 * log(res$p)
+      if(any(is.infinite(res$logp))) res$logp[is.infinite(res$logp)] <- 25
+      
+      if(!is.na(filter)){
+        if(verbose) print("Removing the following mutations: ", paste(filter, sep=","))
+        f.idx <- as.integer(unlist(sapply(filter, function(f) grep(f, res$class))))
+        if(length(f.idx) > 0) res <- res[-f.idx,]
+      }
+      res
+      
+    }, filter=NA, verbose=TRUE)
+    sum.pp <- sapply(y, function(x) sum(x$logp))
+    ref.ecdf <- sort(as.numeric(unlist(sapply(y, function(x) x$logp))))
+    ks <- sapply(y, function(x) ks.test(x=x$logp, y=ref.ecdf,
+                                        #y=ref.ecdf[round(runif(n=nrow(x), min = 1, max=length(ref.ecdf)),0)], 
+                                        alternative="less")$p.value)
+    ksq <- p.adjust(ks, method="fdr", n=length(ks))
+
     # Calculates binomial probability of Homozygous skew in AF
     binom.p <- sapply(het.maf.per.gene, getBinomialP, 
                       min.depth, mad.multiplier, exp.hom.frac, 
@@ -215,18 +279,24 @@ all.het.mafs.avg.af <- lapply(list.files(file.path(pdir, "maf")),
     mafs.pos <- t(do.call("rbind", mafs.pos))
     
     
-    list("hets"=het.mafs.avg.af,
+    list("hets"=het.mafs.avg.actual.af,
+         "rough.hets"=het.mafs.avg.af,
          "snps"=tbl.snps,
          "snps.per.gene"=tbl.snps.per.gene,
          "cov"=tbl.cov,
          "p"=binom.p,
-         "pos"=mafs.pos)
+         "ks"=ksq,
+         "pos"=mafs.pos,
+         "snp.ks"=y)
   }, error=function(e) { list("hets"=NA,
+                              "rough.hets"=NA,
                               "snps"=NA,
                               "snps.per.gene"=NA,
                               "cov"=NA,
                               "p"=NA,
-                              "pos"=NA) })
+                              "ks"=NA,
+                              "pos"=NA,
+                              "snp.ks"=NA) })
   
   het.mafs.avg.af
 })
@@ -234,6 +304,7 @@ all.het.mafs.avg.af <- lapply(list.files(file.path(pdir, "maf")),
 #### Filter Genes ####
 # Genes require at least 1 snp covering to be post-filtered
 keep.idx <- sapply(all.het.mafs.avg.af, function(x) length(x[['hets']]) > 1)
+table(keep.idx)  # 38 keeps, 0 throw-aways
 keep.ids <- list.files(file.path(pdir, "maf"))[which(keep.idx)]
 all.het.mafs.avg.af <- all.het.mafs.avg.af[which(keep.idx)]
 names(all.het.mafs.avg.af) <- keep.ids
@@ -257,7 +328,9 @@ rownames(pval.mat) <- keep.ids
 # Pos x Gene matrix
 all.pos.mat <- do.call("cbind", lapply(all.het.mafs.avg.af, function(x) x[['pos']]))
 all.pos.mat <- all.pos.mat[,!duplicated(all.pos.mat[1,])]
-
+# KS x Gene matrix
+ks.mat <- rbind.fill(lapply(all.het.mafs.avg.af, function(x) as.data.frame(t(x[['ks']]))))
+rownames(ks.mat) <- keep.ids
 
 #### Identify allelic imbalances ####
 # Split into meaningful groups, with PNETs being the target 
@@ -281,13 +354,71 @@ max.num.NA.samples <- ceiling(nrow(all.het.mat) * max.frac.NA.samples)
 pnet <- mapMatrices(all.het.mat, pnet.idx)
 ginet <- mapMatrices(all.het.mat, ginet.idx)
 
+## Overlap KS genes
+q.cutoff <- 0.2
+sig.ks.genes <- apply(pnet[['ks']], 1, function(x) names(which(x < q.cutoff)))
+n.cutoff <- nrow(pnet[['ks']]) / 2
+sig.ks.genes <- names(which(sort(table(unlist(sig.ks.genes))) > n.cutoff))
+
+g.ks.genes <- apply(ginet[['ks']], 1, function(x) names(which(x < q.cutoff)))
+n.cutoff <- nrow(ginet[['ks']]) / 2
+g.ks.genes <- names(which(sort(table(unlist(g.ks.genes))) > n.cutoff))
+
+
+
+getSampleInfo <- function(x, samples=pnet, type='AF'){
+  xy <- lapply(x, function(y){as.data.frame(as.matrix(summary(c(samples[[type]][,y], NA))))})
+  xy <- do.call("cbind",xy)
+  colnames(xy) <- x
+  xy <- xy[,order(xy['Mean',])]
+  xy
+}
+
+cat(paste(setdiff(sig.ks.genes, g.ks.genes), collapse="\n"))
+xy <- getSampleInfo(setdiff(sig.ks.genes, g.ks.genes), pnet, 'AF')
+sapply(colnames(xy[,which(xy['Mean',] > 0.8)]), function(x){
+  summary(pnet[['ks']][,x])
+})
+sort(table(unlist(sig.ks.genes)))[colnames(xy[,which(xy['Mean',] > 0.8)])]
+
+
+cat(paste(setdiff(g.ks.genes, sig.ks.genes), collapse="\n"))
+xy <- getSampleInfo(setdiff(g.ks.genes, sig.ks.genes), pnet, 'AF')
+xy[,xy['Mean',] > 0.75]
+cat(paste(intersect(g.ks.genes, sig.ks.genes), collapse="\n"))
+xy <- getSampleInfo(intersect(g.ks.genes, sig.ks.genes), pnet, 'AF')
+xy[,xy['Mean',] > 0.75]
+xy[,order(xy['Mean',])]
+  
+
+### End of continuous AF analysis
+###------------
+
+pdf(file.path(pdir, "output", "ks_af.pdf"))
+plot(as.matrix(pnet[['AF']]), as.matrix(pnet[['ks']]), 
+     pch=16, col=alpha("black", 0.5),
+     xlab="Allelic Fraction", ylab="q-value")
+plot(as.matrix(pnet[['AF']][10,,drop=FALSE]), 
+     as.matrix(pnet[['ks']][10,,drop=FALSE]), 
+     xlab="Allelic Fraction", ylab="q-value",
+     pch=16, col=alpha("black", 0.5))
+dev.off()
+pdf(file.path(pdir, "output", "overlap_ksMAD.pdf"))
+v <- venn.diagram(list(mad.p=sig.ks.genes, mad.n=g.ks.genes),
+                  fill = c("orange", "blue"),
+                  alpha = c(0.5, 0.5), cat.cex = 1.5, cex=1.5,
+                  filename=NULL)
+grid.newpage()
 
 ## Get significantly imbalanced genes and apply FDR correction
+# Filters out genes with less than a minimum q
+# Filters out genes with fewer than min.samples fraction
 pnet.q <- allelicImbalance(p.mat=pnet[['p']], af.mat=pnet[['AF']], q=0.25)
 ginet.q <- allelicImbalance(p.mat=ginet[['p']], af.mat=ginet[['AF']], q=0.25)
 
 ## Overlap imbalanced genes with weighted mean AF rank
-p.rank.af <- rankWeightedAF(pnet[['AF']], p=1, top=0.95)
+# Filters for only genes in the top quantile
+p.rank.af <- rankWeightedAF(pnet[['AF']], p=1, top=0.75)
 g.rank.af <- rankWeightedAF(ginet[['AF']], p=1)
 
 p.sigq <- intersect(names(pnet.q[['sig.q']]), names(p.rank.af[['top']]))
@@ -395,7 +526,27 @@ lapply(chr.ids, function(each.chr){
 close.screen(all.screens = TRUE)
 dev.off()
 
+###------------------------------------------------
+
+gene <- 'SH3RF1'  # each.chr <- '4'
+gene <- 'ZNF708' # each.chr <- '19'
+idx <- grep(gene, rownames(af.split[[each.chr]]))
+x1 <- af.split[[each.chr]][idx,,drop=FALSE]
+t(x1)
+x2 <- af.split[[each.chr]][idx+1,,drop=FALSE]
+t(x2)
+
+x <- af.split[[each.chr]][c((idx-3):(idx+3)),,drop=FALSE]
+do.call("cbind", apply(x, 1, summary))
 
 
 
-
+library(MASS)
+library(mclust)
+SNPMAT <- snps.split[[each.chr]]
+COVMAT <- cov.split[[each.chr]]
+AFMAT <- af.split[[each.chr]]
+filtMAT <- AFMAT
+filtMAT[SNPMAT < 2] <- NA
+filtMAT[COVMAT < 5] <- NA
+hist(as.numeric(unlist(filtMAT)), na.rm = TRUE, breaks = 25)
