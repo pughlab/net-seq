@@ -1,5 +1,5 @@
 library(metafor)
-setwd('/Users/rquevedo/git/loh_cn_visualize/cgh_plotter/')
+setwd('~/git/loh_cn_visualize/cgh_plotter/')
 load("~/git/loh_cn_visualize/data/cgh_df.RData")
 
 specify_decimal <- function(x, k) format(round(x, k), nsmall=k)
@@ -153,20 +153,22 @@ lapply(split(cgh.df.raw, cgh.df.raw$hclust), function(cgh.df){
   par(op)
   
   ### fit random-effects model in the three subgroups
-  res.net <- rma(ai=hipos, bi=hineg, ci=lowpos, di=lowneg, data=cgh.contigency.df, measure=meta.meas,
+  tryCatch({
+    res.net <- rma(ai=hipos, bi=hineg, ci=lowpos, di=lowneg, data=cgh.contigency.df, measure=meta.meas,
                  subset=(alloc=="NET"), method="REML")
-  res.fstat <- rma(ai=hipos, bi=hineg, ci=lowpos, di=lowneg, data=cgh.contigency.df, measure=meta.meas,
-                   subset=(alloc=="F.stat"), method="REML")
-  res.met <- rma(ai=hipos, bi=hineg, ci=lowpos, di=lowneg, data=cgh.contigency.df, measure=meta.meas,
-                 subset=(alloc=="Met.stat"), method="REML")
-  
-  
-  ### add summary polygons for the three subgroups
-  addpoly(res.net, row=tbl.inf$poly['G1'], cex=cex.val, atransf=exp, mlab="RE Model for Subgroup")
-  addpoly(res.fstat, row= tbl.inf$poly['G2'], cex=cex.val, atransf=exp, mlab="RE Model for Subgroup")
-  addpoly(res.met, row= tbl.inf$poly['G3'], cex=cex.val, atransf=exp, mlab="RE Model for Subgroup")
-  
-  
+    addpoly(res.net, row=tbl.inf$poly['G1'], cex=cex.val, atransf=exp, mlab="RE Model for Subgroup")
+  }, error=function(e){NA})
+  tryCatch({
+    res.fstat <- rma(ai=hipos, bi=hineg, ci=lowpos, di=lowneg, data=cgh.contigency.df, measure=meta.meas,
+                     subset=(alloc=="F.stat"), method="REML")
+    addpoly(res.fstat, row= tbl.inf$poly['G2'], cex=cex.val, atransf=exp, mlab="RE Model for Subgroup")
+  }, error=function(e){NA})
+  tryCatch({
+    res.met <- rma(ai=hipos, bi=hineg, ci=lowpos, di=lowneg, data=cgh.contigency.df, measure=meta.meas,
+                   subset=(alloc=="Met.stat"), method="REML")
+    addpoly(res.met, row= tbl.inf$poly['G3'], cex=cex.val, atransf=exp, mlab="RE Model for Subgroup")
+  }, error=function(e){NA}) 
+
   screen(2)
   # Hardcoded extension to forestplot
   x.mar <- par()$mar
@@ -176,13 +178,13 @@ lapply(split(cgh.df.raw, cgh.df.raw$hclust), function(cgh.df){
   abline(h = c(tbl.inf$ylim-2, 0), lty = 'solid', col = "black")
   
   # Add in values for pval 
-  text(0.75, tbl.inf$poly['G1'], labels =specify_decimal(round(res.net$pval,3),3), cex=cex.val)
-  text(0.75, tbl.inf$poly['G2'], labels =specify_decimal(round(res.fstat$pval,3),3), cex=cex.val)
-  text(0.75, tbl.inf$poly['G3'], labels =specify_decimal(round(res.met$pval,3),3), cex=cex.val)
+  if(!is.na(res.net)) text(0.75, tbl.inf$poly['G1'], labels =specify_decimal(round(res.net$pval,3),3), cex=cex.val)
+  if(!is.na(res.fstat)) text(0.75, tbl.inf$poly['G2'], labels =specify_decimal(round(res.fstat$pval,3),3), cex=cex.val)
+  if(!is.na(res.met)) text(0.75, tbl.inf$poly['G3'], labels =specify_decimal(round(res.met$pval,3),3), cex=cex.val)
   # Add in values for I^2
-  text(2, tbl.inf$poly['G1'], labels =specify_decimal(round(res.net$I2,2),2), cex=cex.val)
-  text(2, tbl.inf$poly['G2'], labels =specify_decimal(round(res.fstat$I2,2),2), cex=cex.val)
-  text(2, tbl.inf$poly['G3'], labels =specify_decimal(round(res.met$I2,2),2), cex=cex.val)
+  if(!is.na(res.net)) text(2, tbl.inf$poly['G1'], labels =specify_decimal(round(res.net$I2,2),2), cex=cex.val)
+  if(!is.na(res.fstat)) text(2, tbl.inf$poly['G2'], labels =specify_decimal(round(res.fstat$I2,2),2), cex=cex.val)
+  if(!is.na(res.met)) text(2, tbl.inf$poly['G3'], labels =specify_decimal(round(res.met$I2,2),2), cex=cex.val)
   
   ### set font expansion factor (as in forest() above) and use bold 
   par(cex=cex.val, font=4)

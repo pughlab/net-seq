@@ -289,9 +289,9 @@ sinet.otb.frac.loh.df <- sinet.otb.frac.loh.df[!rownames(sinet.otb.frac.loh.df) 
 # }
 
 all.frac.loh.list[[sample.id]] <- as.data.frame(cbind(pnet.frac.loh.df, disease=rep(sample.id, dim(pnet.frac.loh.df)[1])))
-all.frac.loh.list[[sample.id2]] <- as.data.frame(cbind(sinet.frac.loh.df, disease=rep(sample.id2, dim(sinet.frac.loh.df)[1])))
+#all.frac.loh.list[[sample.id2]] <- as.data.frame(cbind(sinet.frac.loh.df, disease=rep(sample.id2, dim(sinet.frac.loh.df)[1])))
 all.frac.loh.list[[sample.otb.id]] <- as.data.frame(cbind(pnet.otb.frac.loh.df, disease=rep(sample.otb.id, dim(pnet.otb.frac.loh.df)[1])))
-all.frac.loh.list[[sample.otb.id2]] <- as.data.frame(cbind(sinet.otb.frac.loh.df, disease=rep(sample.otb.id2, dim(sinet.otb.frac.loh.df)[1])))
+#all.frac.loh.list[[sample.otb.id2]] <- as.data.frame(cbind(sinet.otb.frac.loh.df, disease=rep(sample.otb.id2, dim(sinet.otb.frac.loh.df)[1])))
 
 
 
@@ -403,7 +403,7 @@ t.tot.loh.frac <- t(data.frame(cn=disease.cn.mean,
   axis(3, at=mid.plot.range, labels=dis.names, las=2, col.axis='red', cex.axis=0.7)
   dis.names <- disease.names
   dis.names[-sample.otb.pos] <- ''
-  axis(3, at=mid.plot.range, labels=dis.names, las=2, col.axis='blue', cex.axis=0.7)
+  #axis(3, at=mid.plot.range, labels=dis.names, las=2, col.axis='blue', cex.axis=0.7)
   
   
   # # PLOT 2/3/4: Scatterplot for LOH Segment Gains, Neutral, Losses

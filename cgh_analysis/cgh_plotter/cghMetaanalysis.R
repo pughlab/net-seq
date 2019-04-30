@@ -1,5 +1,5 @@
 library(metafor)
-setwd('/Users/rquevedo/git/loh_cn_visualize/cgh_plotter/')
+setwd('~/git/loh_cn_visualize/cgh_plotter/')
 load("~/git/loh_cn_visualize/data/cgh_df.RData")
 
 specify_decimal <- function(x, k) format(round(x, k), nsmall=k)

@@ -2,29 +2,30 @@ library(gtools)
 library(vcd)
 library(intervals)
 library(xtable)
-load("~/git/reference/cytoband/chr_cytoband.hg19.Rdata")
+require(RColorBrewer)
 
-hg19.cytoband <- read.csv("/Users/rquevedo/Desktop/cytoband.hg19.tsv", sep="\t", header=TRUE,
+load("~/git/net-seq/ref/cytoband/chr_cytoband.hg19.Rdata")
+
+hg19.cytoband <- read.csv("~/git/net-seq/ref/cytoband/cytoband.hg19.tsv", sep="\t", header=TRUE,
                           stringsAsFactors=FALSE, check.names=FALSE)
 colnames(hg19.cytoband)[1] <- 'chrom'
-load("/Users/rquevedo/git/reference/cytoband/chr_cytoband.hg19.Rdata")
-load("/Users/rquevedo/git/loh_cn_visualize/data/data.aggregateLoh.Rdata")  #PNETs, GINETs, CCL
+load("~/git/loh_cn_visualize/data/data.aggregateLoh.Rdata")  #PNETs, GINETs, CCL
 ucsc.chrom <- ucsc.chrom[order(ucsc.chrom$chr.num),]
 ucsc.chrom$mid.st <- ucsc.chrom$chr.st.size + (ucsc.chrom$size / 2)
-ucsc.chromInfo <- '/Users/rquevedo/Desktop/bhk_lab/reference/ucsc.hg19.chromInfo.txt'
-#load("/Users/rquevedo/git/loh_cn_visualize/data/data.aggregateLoh.Rdata")  #PNETs, GINETs, CCL
-#load("/Users/rquevedo/git/shallowWgsCnv/data/otbData.aggregateLoh.medianLOH.Rdata")  # otb-PNET, otb-GINET
-#load("/Users/rquevedo/git/shallowWgsCnv/data/otbData.aggregateLoh.muLOH.Rdata")  # otb-PNET, otb-GINET
-load("/Users/rquevedo/Desktop/PughLab/NET-seq/otb_samples/net_OTB/plots/postPathBlacklisted/medLOHseg-0.25/otbData.aggregateLoh.medianLOH.Rdata")  # Filtered one
+ucsc.chromInfo <- '~/Onedrive/bhk_lab/reference/ucsc.hg19.chromInfo.txt'
+#load("~/git/loh_cn_visualize/data/data.aggregateLoh.Rdata")  #PNETs, GINETs, CCL
+#load("~/git/shallowWgsCnv/data/otbData.aggregateLoh.medianLOH.Rdata")  # otb-PNET, otb-GINET
+#load("~/git/shallowWgsCnv/data/otbData.aggregateLoh.muLOH.Rdata")  # otb-PNET, otb-GINET
+load("~/Onedrive/PughLab/NET-seq/otb_samples/net_OTB/plots/postPathBlacklisted/medLOHseg-0.25/otbData.aggregateLoh.medianLOH.Rdata")  # Filtered one
 
-source('/Users/rquevedo/git/loh_cn_visualize/cgh_plotter/binCgh.R')
-source('/Users/rquevedo/git/loh_cn_visualize/cgh_plotter/cnaPlot.R')
-source('/Users/rquevedo/git/loh_cn_visualize/cgh_plotter/genomicCoord.R')
-source('/Users/rquevedo/git/loh_cn_visualize/cgh_plotter/cytobandCoord.R')
-source('/Users/rquevedo/git/loh_cn_visualize/cgh_plotter/binLoh.R')
-source("/Users/rquevedo/git/cn-annotater/src/annotateSeg.R")
+source('~/git/loh_cn_visualize/cgh_plotter/binCgh.R')
+source('~/git/loh_cn_visualize/cgh_plotter/cnaPlot.R')
+source('~/git/loh_cn_visualize/cgh_plotter/genomicCoord.R')
+source('~/git/loh_cn_visualize/cgh_plotter/cytobandCoord.R')
+source('~/git/loh_cn_visualize/cgh_plotter/binLoh.R')
+source("~/git/cn-annotater/src/annotateSeg.R")
 
-cgh.dir <- '/Users/rquevedo/Desktop/PughLab/NET-seq/cgh_analysis/all/'
+cgh.dir <- '~/Onedrive/PughLab/NET-seq/cgh_analysis/all/'
 setwd(cgh.dir)
 
 eval.netseq <- 1  # Add in NETSEQ dataset
@@ -67,7 +68,7 @@ t.genome.size <- t.genome.size + ucsc.chrom[t.genome.row, 'size']
 ### ---------------------------------------------------------------------------- ###
 if(eval.netseq == 1){
   ### Gets all Losses and Gains from Sequenza
-  net.seq.dir <- '/Users/rquevedo/Desktop/PughLab/NET-seq/Sequenza/all'
+  net.seq.dir <- '~/Onedrive/PughLab/NET-seq/Sequenza/all'
   
   loss.list <- list()
   gain.list <- list()
@@ -101,7 +102,8 @@ if(eval.netseq == 1){
   # populate a list for genomic regions of gains, loss and LOH based on 
   # Sequenza-like (made from sWGS tool) files for the validation cohort
   if(length(grep("otb", names(disease.list))) > 0){
-    for(each.net in names(disease.list)){
+    # names(disease.list)
+    for(each.net in 'otb-pnet'){
       for(each.name in names(disease.list[[each.net]])){
         print(each.name)
         net.swgs.df <- as.data.frame(disease.list[[each.net]][[each.name]], stringsAsFactors=FALSE)
@@ -147,7 +149,7 @@ if(eval.netseq == 1){
   populated.interval <- collapseSegments(populated.interval,
                                          cn.stat=FALSE, group.collapse=TRUE,
                                          group.ids=c(names(disease.list[['otb-pnet']]), pnet.ids))
-  source("/Users/rquevedo/git/cn-annotater/src/annotateSeg.R")
+  source("~/git/cn-annotater/src/annotateSeg.R")
   populated.interval <- annotateSeg(populated.interval,
                                     loc.headers=c("chr", "start.pos", "end.pos"))
   
@@ -186,10 +188,10 @@ if(eval.netseq == 1){
   
   ### Formats the netseq.df to append to the main cgh.df
   netseq.df <- as.data.frame(matrix(ncol=10, 
-                                    nrow=length(list.files(path=net.seq.dir, pattern=".txt"))), 
+                                    nrow=length(list.files(path=net.seq.dir, pattern="T_2-N.gz_segments.txt"))), 
                              stringsAsFactors=FALSE, check.names=FALSE)
   colnames(netseq.df) <- colnames(cgh.df)
-  rownames(netseq.df) <- gsub("-T.+$", "", list.files(path=net.seq.dir, pattern=".txt"))
+  rownames(netseq.df) <- gsub("-T.+$", "", list.files(path=net.seq.dir, pattern="T_2-N.gz_segments.txt"))
   netseq.df$Case <- NA
   netseq.df$Sex <- NA
   netseq.df$Age <- NA
@@ -204,24 +206,24 @@ if(eval.netseq == 1){
   
   ### Formats the netseq.df to append to the main cgh.df  # - EXTENDED COHORT
   netseq.df <- as.data.frame(matrix(ncol=10,
-                                    nrow=sum(sapply(disease.list, length))),
+                                    nrow=length(disease.list[['otb-pnet']])),
                              stringsAsFactors=FALSE, check.names=FALSE)
   colnames(netseq.df) <- colnames(cgh.df)
-  rownames(netseq.df) <- gsub("-2-0", "-1", unlist(sapply(disease.list, names)))
+  rownames(netseq.df) <- gsub("-2-0", "-1", names(disease.list[['otb-pnet']]))
   netseq.df$Case <- NA
   netseq.df$Sex <- NA
   netseq.df$Age <- NA
-  netseq.df$NET <- rep(c("PNET", "GINET"), sapply(disease.list, length))
+  netseq.df$NET <- rep("PNET", length(disease.list[['otb-pnet']]))
   netseq.df$F.stat <- "Unk"
   netseq.df$Met <- "Liver"
-  netseq.df$Losses <- loss.list[unlist(sapply(disease.list, names))]
-  netseq.df$Gains <- gain.list[unlist(sapply(disease.list, names))]
+  netseq.df$Losses <- loss.list[names(disease.list[['otb-pnet']])]
+  netseq.df$Gains <- gain.list[names(disease.list[['otb-pnet']])]
   netseq.df$Met.stat <- c(rep("Yes", 3), rep("No", 1), rep("Yes", 2), rep("No", 1),
-                          rep("Yes", 1), rep("No", 5), rep("Yes", 1), rep("No", 1),
-                          rep("Yes", 8))
+                          rep("Yes", 1), rep("No", 5)) #, rep("Yes", 1), rep("No", 1), rep("Yes", 8)
   netseq.df$Study.id <- "NETSEQ.ext"
   cgh.df <- rbind(cgh.df, netseq.df)
 
+  cgh.df <- cgh.df[-which(cgh.df$NET != 'PNET'),]
 }
 
 
@@ -292,7 +294,8 @@ cgh.conc <- lapply(split.cgh.bins, function(a) {
     if(length(a.stat) == zero.ab){
       len.ab <- 0
     } else {
-      len.ab <- (len.ab - zero.ab)/(length(a.stat) - zero.ab)
+      #len.ab <- (len.ab - zero.ab)/(length(a.stat) - zero.ab)
+      len.ab <- len.ab / length(a.stat)
     }
     return(len.ab)
   }) 
@@ -310,7 +313,7 @@ x <- hclust(dist(cgh.conc.mat))
 cgh.df <- cgh.df[match(x$labels[x$order], rownames(cgh.df)),]
 
 # Assigns group.ids to different samples in the CGH dataframe
-k.clust <- 7
+k.clust <- 5  # 7
 hclust.groups <- cutree(x, k=k.clust)
 hclust.ord <- match(rownames(cgh.df), names(hclust.groups))
 cgh.df$hclust <- as.integer(hclust.groups[hclust.ord])
@@ -349,7 +352,14 @@ if(1==0){
 
 #Creates a contigency table and tests for significance between High/Low-CI and metadata categories
 # mean(int.points) = 0.117
-cgh.df$ci.stat <- ifelse(cgh.df$ci.frac >= 0.117, "High-CI", "Low-CI")
+require(mclust)
+fit <- Mclust(cgh.df$ci.frac)
+if(fit$G > 2) warning("Number of EM clusters is greater than 2!")
+max.idx <- which(fit$parameters$mean >= 0.2)
+high.idx <- which(fit$classification %in% names(max.idx))
+cgh.df$ci.stat <- "Low-CI"
+cgh.df$ci.stat[high.idx] <- 'High-CI'
+#cgh.df$ci.stat <- ifelse(cgh.df$ci.frac >= 0.117, "High-CI", "Low-CI")
 hclusters <- cgh.df$ci.stat
 metadata.clust <- c("Study.id", "NET", "F.stat", "Met.stat")
 assoc.df <- data.frame(matrix(ncol=6, nrow=0))
@@ -429,9 +439,10 @@ par(mar=c(0,0,0.3,0))
 cgh.hc <- hclust(dist(cgh.conc.mat))
 plot(cgh.hc, labels=FALSE, hang=-1, 
      axes=FALSE, ylab="", xlab="", main="", sub="", yaxs="i", xaxs="i")
-cgh.col <- heat.colors(k.clust)
+cgh.col <- brewer.pal(k.clust,"Set1")
 for(i in c(1:length(cgh.df$hclust))){
-  rect(xleft=(i-1), ybottom = -1, xright = i, ytop = 0, col=cgh.col[cgh.df$hclust[i]], lty=0)
+  rect(xleft=(i-1), ybottom = -1, xright = i, ytop = 0, 
+       col=cgh.col[cgh.df$hclust[i]], lty=0)
 }
 #rect.hclust(cgh.hc, k=k.clust, border="red")
 
@@ -533,7 +544,7 @@ dev.off()
 
 
 
-# setwd('/Users/rquevedo/git/loh_cn_visualize/cgh_plotter')
+# setwd('~/git/loh_cn_visualize/cgh_plotter')
 # save(ucsc.chrom, hg19.cytoband, cgh.list, cgh.df, split.cgh.bins, file="cghRawData.netseq.Rdata")
 
 

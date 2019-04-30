@@ -1,7 +1,12 @@
+library(weights)
 library(plyr)
 library(scales)
 library(survcomp)
 library(VennDiagram)
+library(org.Hs.eg.db)
+library(TxDb.Hsapiens.UCSC.hg19.knownGene)
+library(reshape2)
+
 pdir <- '/mnt/work1/users/pughlab/projects/NET-SEQ/rna_seq_external/MAE'
 script.dir <- '/mnt/work1/users/home2/quever/git/loh_cn_visualize/data'
 MAD.samples <- file.path(pdir, "samples", "samples_MAD-netseq.txt")
@@ -13,6 +18,7 @@ max.frac.NA.samples <- 0.25  # max fraction of samples to have no read coverage
 ordering <- TRUE # boolean whether to order genes based on AF
 AF.threshold <- 0.8 # Allelic imbalance threshold where 95% of data must be above
 min.snps <- 2
+q.cutoff <- 0.2 # Samples must have a q value less than this to be considere "Significant"
 min.depth <- 10  # 1 - pbinom(3,4,0.44) is the min to get 0.05 pval
 min.samples <- 0.50 # Min fraction of samples to needed to evaluate MAE
 mad.multiplier=4 # Removes SNPs with coverage > median + 4MAD per gene
@@ -123,7 +129,8 @@ mapMatrices <- function(het.mat, r.idx){
                                            colnames(het.mat),
                                            colnames(cov.mat),
                                            colnames(pval.mat),
-                                           colnames(ks.mat)))
+                                           colnames(estq.mat),
+                                           colnames(estp.mat)))
   gene.pos.mat <- all.pos.mat[,gene.intersect]
   genomic.order <- order(as.numeric(gene.pos.mat['chr',]),
                          as.numeric(gene.pos.mat['start.pos',]))
@@ -135,14 +142,16 @@ mapMatrices <- function(het.mat, r.idx){
   out.cov.per.gene <- cov.mat[r.idx,gene.intersect]
   out.het.mat <- het.mat[r.idx,gene.intersect]
   out.pval.mat <- pval.mat[r.idx,gene.intersect]
-  out.ks.mat <- ks.mat[r.idx,gene.intersect]
+  out.estp.mat <- estp.mat[r.idx,gene.intersect]
+  out.estq.mat <- estq.mat[r.idx,gene.intersect]
   
   
   list("Snps"=out.snps.per.gene,
        "Cov"=out.cov.per.gene,
        "AF"=out.het.mat,
        "p"=out.pval.mat,
-       'ks'=out.ks.mat)
+       'estp'=out.estp.mat,
+       'estq'=out.estq.mat)
 }
 
 # Given  a matrix of AF with columns as genes, it calculates the mean AF
@@ -162,6 +171,128 @@ rankWeightedAF <- function(af.mat, p=1, top.q=0.95){
 # Print a vector for copy/paste into Enrichr
 catGenes <- function(x) { cat(paste0(x, "\n")) }
 
+# Visualization: Plots points on the boxplot and colours according to filters
+overlapPoints <- function(melt.af, q, chr.ord,
+                          gene.idx, jitter=0.3,
+                          print.chr=TRUE, print.stats=FALSE,
+                          plot.stats=TRUE,
+                          sig.col='red', nonsig.col="gray39", 
+                          nonpow.col='black'){
+  
+  melt.af$xidx <- rep(rev(gene.idx), 
+                      rle(as.character(melt.af$gene))$lengths)
+  melt.af$xidx.jitter <- melt.af$xidx + runif(n = nrow(melt.af), 
+                                              min = (-1 * jitter), max = jitter)
+  
+  melt.q <- melt(q[,chr.ord])
+  melt.af$q <- melt.q$value
+  
+  melt.af <- melt.af[-grep("^chr", melt.af$gene),]
+  # Non-sig q samples per gene
+  with(melt.af[which(!is.na(melt.af$q)),],
+       points(y=xidx.jitter, x=value, col=alpha(nonsig.col, 0.6), pch=16))
+  
+  # Underpowered and untested samples/gene
+  with(melt.af[which(is.na(melt.af$q)),], 
+       points(y=xidx.jitter, x=value, col=alpha(nonpow.col, 1), pch=1))
+  
+  # Significant q genes/samples
+  with(melt.af[which(melt.af$q < 0.2),],
+       points(y=xidx.jitter, x=value, col=alpha(sig.col, 0.6), pch=16))
+  
+  spl.af <- split(melt.af, f=as.character(melt.af$gene))
+  summ.n <- sapply(spl.af, function(x) {
+    sigq <- length(which(x$q < 0.2))
+    lowq <- length(which(with(x, q >= 0.2 & !is.na(value))))
+    uncov <- length(which(with(x, is.na(q) & !is.na(value))))
+    
+    c("sigq"=sigq, "lowq"=lowq, "uncov"=uncov)
+  })
+  if(print.stats){
+    summ <- apply(summ.n, 2, function(i) paste0("[", paste(i, collapse=","), "]"))
+    
+    text(x=0.4, y = sapply(spl.af, function(x) unique(x$xidx)),
+         labels=summ, pos = 4, cex=0.8)
+  } else if(plot.stats){
+    n <- unique(sapply(spl.af, nrow))
+    
+    prop <- apply(summ.n, 2, function(i) round(i / n, 2)/10)
+    prop.xmin <- as.numeric(apply(prop, 2, function(i) c(0, cumsum(i)[-3])))
+    prop.xmax <- as.numeric(apply(prop, 2, function(i) cumsum(i)))
+    
+    y.idx <- matrix(rep(sapply(spl.af, function(x) unique(x$xidx)),3), ncol=3)
+    y.idx <- as.integer(t(y.idx))
+    
+    cols <- rep(c(alpha(sig.col, 0.6), 
+                  alpha(nonsig.col, 0.6), 
+                  alpha(nonpow.col, 0)), length(spl.af))
+    
+    min.x <- 0.35
+    rect(xleft = min.x + prop.xmin, ybottom = y.idx - 0.5, 
+         xright = min.x + prop.xmax, ytop = y.idx + 0.5,
+         col=cols, border=TRUE)
+  }
+  
+  if(print.chr){
+    spl.af <- split(melt.af, f=melt.af$chr)
+    chr.pos <- sapply(spl.af, function(x) mean(x$xidx))
+    
+    axis(side = 2, at = c(max(melt.af$xidx) + 1, chr.pos), 
+         labels = c("Chr", gsub("chr", "", names(chr.pos), ignore.case = TRUE)), 
+         cex=0.7, line=3, tick = FALSE, las=1)
+  }
+  
+  melt.af
+}
+
+# Visualization: Melts dataframes of AF and appends relevant data
+meltAf <- function(af, g1, chr.ord, do.all=FALSE){
+  # Create chrX_Gene IDs, sort by Chr
+  colnames(af) <- paste(as.character(seqnames(g1)), 
+                        colnames(af), sep="_")
+  
+  af.ord <- af[,chr.ord]
+  
+  # Melt and split Chr/Gene into columns
+  melt.af <- melt(af.ord)
+  chr.gene <- sapply(as.character(melt.af$variable), function(x) strsplit(x, split="_"))
+  melt.af <- cbind(melt.af, do.call("rbind", chr.gene))
+  colnames(melt.af) <- c("variable", "value", "chr", "gene")
+  if(do.all) melt.af$gene <- melt.af$chr
+  
+  # Reverse order of gene levels for boxplot plotting
+  g <- as.character(melt.af$gene)
+  melt.af$gene <- factor(g, levels=rev(unique(g)))
+  melt.af
+}
+
+# Accessor for the PNET/GINET data structure to get AF/q-values/Cov/SNPs
+getSampleInfo <- function(x, samples=pnet, type='AF', 
+                          summarize=TRUE, ord=NA){
+  xy <- lapply(x, function(y){
+    if(summarize) {
+      dat <- summary(c(samples[[type]][,y], NA)) 
+    } else {
+      dat <- samples[[type]][,y]
+    }
+    as.data.frame(as.matrix(dat))
+  })
+  xy <- do.call("cbind",xy)
+  colnames(xy) <- x
+  
+  if(all(is.na(ord))){
+    if(summarize) {
+      ord <- order(xy['Mean',])
+    } else {
+      ord <- order(apply(xy, 2, mean, na.rm=TRUE), decreasing = TRUE)
+    }
+  } else {
+    ord <- match(ord, colnames(xy))
+  }
+  xy <- xy[,ord]
+  xy
+}
+
 #### Load Data ####
 MAD <- read.table(MAD.samples, header=FALSE,
                   stringsAsFactors = FALSE, check.names = FALSE)
@@ -173,8 +304,6 @@ pnets <- MAD[!MAD %in% ginets]
 setwd(pdir)
 
 #### Parse MAF File ####
-all.het.mafs.avg.af.snp1 <- all.het.mafs.avg.af
-all.het.mafs.avg.af.snp2 <- all.het.mafs.avg.af
 all.het.mafs.avg.af <- lapply(list.files(file.path(pdir, "maf")), 
                               function(each.file){
   each.maf <- read.table(file.path(pdir, "maf", each.file), header=TRUE, 
@@ -238,30 +367,49 @@ all.het.mafs.avg.af <- lapply(list.files(file.path(pdir, "maf")),
                         "alt"=cnt, "depth"=as.numeric(x$read_depth),
                         "af"=af, stringsAsFactors = FALSE)
       res$P <- round(with(res, (depth-alt) / depth), 3)
-      if(any(res$P == 0)) res$P[res$P == 0] <- 0.001
+      if(any(is.na(res$P))) res <- res[-which(is.na(res$P)),]
+      if(any(res$P == 0)) res$P[res$P == 0] <- 10^-(res$depth[res$P == 0]/10)
+      if(any(res$P <= 0.001)) res$P[res$P <= 0.001] <- 0.001
       res$RR <- with(res, P/0.5)
-      if(any(res$RR > 1)) res$RR[res$RR > 1] <- 1
-      res$logRR <- with(res, (-1 * log(RR)) + 1) 
+      if(any(na.omit(res$RR) > 1)) res$RR[res$RR > 1] <- 1
+      res$logRR <- with(res, (-1 * log10(RR)) + 1) 
       
-      res$p <- with(res, 1 - pbinom(alt-1, depth, prob = 0.5))
-      res$logp <- -1 * log(res$p)
-      if(any(is.infinite(res$logp))) res$logp[is.infinite(res$logp)] <- 25
-      
-      if(!is.na(filter)){
-        if(verbose) print("Removing the following mutations: ", paste(filter, sep=","))
-        f.idx <- as.integer(unlist(sapply(filter, function(f) grep(f, res$class))))
-        if(length(f.idx) > 0) res <- res[-f.idx,]
-      }
       res
       
     }, filter=NA, verbose=TRUE)
-    sum.pp <- sapply(y, function(x) sum(x$logp))
-    ref.ecdf <- sort(as.numeric(unlist(sapply(y, function(x) x$logp))))
-    ks <- sapply(y, function(x) ks.test(x=x$logp, y=ref.ecdf,
-                                        #y=ref.ecdf[round(runif(n=nrow(x), min = 1, max=length(ref.ecdf)),0)], 
-                                        alternative="less")$p.value)
-    ksq <- p.adjust(ks, method="fdr", n=length(ks))
-
+    
+    
+    null.t <- function(x,y,R=100){
+      xy <- round(c(x,y),3)
+      x <- (x - mean(x, na.rm=TRUE)) + mean(xy, na.rm=TRUE)
+      y <- (y - mean(y, na.rm=TRUE)) + mean(xy, na.rm=TRUE)
+      
+      sapply(1:R, function(i){
+        x0 <- sample(xy, size=length(x), replace = TRUE) 
+        y0 <- sample(xy, size=length(y), replace = TRUE) 
+        
+        round(t.test(x0, y0)$statistic,3)
+      })
+    }
+    
+    wtd.t <- function(x,w,y, R=100, min.x=8){
+      if(length(x) < min.x) return(NA)
+      x <- rep(x, w)
+      
+      sapply(1:R, function(i){
+        x1 <- sample(x, size=length(x), replace = TRUE) 
+        y1 <- sample(y, size=length(y), replace = TRUE) 
+        
+        round(t.test(x1, y1)$statistic,3)
+      })
+    }
+    
+    ref.dist <- as.numeric(unlist(sapply(y, function(x) x$af)))
+    t0 <- null.t(sample(ref.dist, mean(sapply(y, nrow))), ref.dist, R=1000)
+    z <- lapply(y, function(x) wtd.t(x$af, x$logRR, ref.dist))
+    est.p <- sapply(z, function(i) sum(t0 > i) / length(t0))
+    est.q <- p.adjust(est.p, method = 'fdr', n = length(na.omit(est.p)))
+    
     # Calculates binomial probability of Homozygous skew in AF
     binom.p <- sapply(het.maf.per.gene, getBinomialP, 
                       min.depth, mad.multiplier, exp.hom.frac, 
@@ -285,7 +433,8 @@ all.het.mafs.avg.af <- lapply(list.files(file.path(pdir, "maf")),
          "snps.per.gene"=tbl.snps.per.gene,
          "cov"=tbl.cov,
          "p"=binom.p,
-         "ks"=ksq,
+         "est.p"=est.p,
+         "est.q"=est.q,
          "pos"=mafs.pos,
          "snp.ks"=y)
   }, error=function(e) { list("hets"=NA,
@@ -294,7 +443,8 @@ all.het.mafs.avg.af <- lapply(list.files(file.path(pdir, "maf")),
                               "snps.per.gene"=NA,
                               "cov"=NA,
                               "p"=NA,
-                              "ks"=NA,
+                              "est.p"=NA,
+                              "est.q"=NA,
                               "pos"=NA,
                               "snp.ks"=NA) })
   
@@ -328,9 +478,13 @@ rownames(pval.mat) <- keep.ids
 # Pos x Gene matrix
 all.pos.mat <- do.call("cbind", lapply(all.het.mafs.avg.af, function(x) x[['pos']]))
 all.pos.mat <- all.pos.mat[,!duplicated(all.pos.mat[1,])]
-# KS x Gene matrix
-ks.mat <- rbind.fill(lapply(all.het.mafs.avg.af, function(x) as.data.frame(t(x[['ks']]))))
-rownames(ks.mat) <- keep.ids
+# Est.p x Gene matrix
+estp.mat <- rbind.fill(lapply(all.het.mafs.avg.af, function(x) as.data.frame(t(x[['est.p']]))))
+rownames(estp.mat) <- keep.ids
+# Est.q x Gene matrix
+estq.mat <- rbind.fill(lapply(all.het.mafs.avg.af, function(x) as.data.frame(t(x[['est.q']]))))
+rownames(estq.mat) <- keep.ids
+
 
 #### Identify allelic imbalances ####
 # Split into meaningful groups, with PNETs being the target 
@@ -354,199 +508,155 @@ max.num.NA.samples <- ceiling(nrow(all.het.mat) * max.frac.NA.samples)
 pnet <- mapMatrices(all.het.mat, pnet.idx)
 ginet <- mapMatrices(all.het.mat, ginet.idx)
 
+#### Summarize significant genes ####
 ## Overlap KS genes
-q.cutoff <- 0.2
-sig.ks.genes <- apply(pnet[['ks']], 1, function(x) names(which(x < q.cutoff)))
-n.cutoff <- nrow(pnet[['ks']]) / 2
-sig.ks.genes <- names(which(sort(table(unlist(sig.ks.genes))) > n.cutoff))
+sig.estq.genes <- apply(pnet[['estq']], 1, function(x) names(which(x < q.cutoff)))
+n.cutoff <- nrow(pnet[['estq']]) / 2
+sig.estq.genes <- names(which(sort(table(unlist(sig.estq.genes))) > n.cutoff))
 
-g.ks.genes <- apply(ginet[['ks']], 1, function(x) names(which(x < q.cutoff)))
-n.cutoff <- nrow(ginet[['ks']]) / 2
-g.ks.genes <- names(which(sort(table(unlist(g.ks.genes))) > n.cutoff))
-
+g.estq.genes <- apply(ginet[['estq']], 1, function(x) names(which(x < q.cutoff)))
+n.cutoff <- nrow(ginet[['estq']]) / 2
+g.estq.genes <- names(which(sort(table(unlist(g.estq.genes))) > n.cutoff))
 
 
-getSampleInfo <- function(x, samples=pnet, type='AF'){
-  xy <- lapply(x, function(y){as.data.frame(as.matrix(summary(c(samples[[type]][,y], NA))))})
-  xy <- do.call("cbind",xy)
-  colnames(xy) <- x
-  xy <- xy[,order(xy['Mean',])]
-  xy
+
+#cat(paste(setdiff(sig.estq.genes, g.estq.genes), collapse="\n"))
+all.af.mad <- getSampleInfo(colnames(pnet[['AF']]), 
+                            pnet, 'AF', summarize=FALSE)
+all.af.wt <- getSampleInfo(colnames(pnet[['AF']]), 
+                           ginet, 'AF', summarize=FALSE)
+
+af.mad <- getSampleInfo(setdiff(sig.estq.genes, g.estq.genes), 
+                        pnet, 'AF', summarize=FALSE)
+q.mad <- getSampleInfo(setdiff(sig.estq.genes, g.estq.genes), 
+                       pnet, 'estq', summarize=FALSE,
+                       ord=colnames(af.mad))
+af.wt <- getSampleInfo(setdiff(sig.estq.genes, g.estq.genes), 
+                       ginet, 'AF', summarize=FALSE,
+                       ord=colnames(af.mad))
+q.wt <- getSampleInfo(setdiff(sig.estq.genes, g.estq.genes), 
+                      ginet, 'estq', summarize=FALSE,
+                      ord=colnames(af.mad))
+
+#### Visualization ####
+input.id <- colnames(af.mad)
+entrez.id <- mapIds(org.Hs.eg.db, keys=input.id,
+                    column="ENTREZID", keytype="SYMBOL",
+                    multiVals="first")
+g0 <- genes(TxDb.Hsapiens.UCSC.hg19.knownGene)
+g1 <- g0[match(entrez.id, g0$gene_id),]
+
+## Process all the genes
+all.input.id <- colnames(all.af.mad)
+all.entrez.id <- mapIds(org.Hs.eg.db, keys=all.input.id,
+                    column="ENTREZID", keytype="SYMBOL",
+                    multiVals="first")
+m.idx <- match(all.entrez.id, g0$gene_id)
+all.na.idx <- which(is.na(m.idx))
+g.all <- g0[m.idx[-all.na.idx],]
+all.af.mad <- all.af.mad[,-all.na.idx]
+all.af.wt <- all.af.wt[,-all.na.idx]
+
+chr.ord <- order(seqnames(g1))
+split.idx <- as.character(seqnames(g1)[chr.ord])
+
+gene.idx <- seq_along(as.character(seqnames(g1)[chr.ord]))
+cum.len <- cumsum(seqnames(g1)[chr.ord]@lengths)
+for(l in cum.len[-length(cum.len)]){
+  gene.idx[(l+1):length(gene.idx)] <- gene.idx[(l+1):length(gene.idx)] + 1
+}
+gene.idx <- sort(max(gene.idx) - gene.idx) + 1
+
+
+melt.af.mad <- meltAf(af.mad, g1, chr.ord)
+melt.af.wt <- meltAf(af.wt, g1, chr.ord)
+melt.all.af.mad <- meltAf(all.af.mad, g.all, 
+                          order(seqnames(g.all)), do.all=TRUE)
+melt.all.af.wt <- meltAf(all.af.wt, g.all,
+                         order(seqnames(g.all)), do.all=TRUE)
+melt.af.mad <- combineAf(melt.af.mad, melt.all.af.mad)
+melt.af.wt <- combineAf(melt.af.wt, melt.all.af.wt)
+
+gene.idx <- seq_along(levels(melt.af.mad$gene))
+for(i in grep("chr", levels(melt.af.mad$gene))[-1]){
+  gene.idx[i:length(gene.idx)] <- gene.idx[i:length(gene.idx)] + 1
 }
 
-cat(paste(setdiff(sig.ks.genes, g.ks.genes), collapse="\n"))
-xy <- getSampleInfo(setdiff(sig.ks.genes, g.ks.genes), pnet, 'AF')
-sapply(colnames(xy[,which(xy['Mean',] > 0.8)]), function(x){
-  summary(pnet[['ks']][,x])
-})
-sort(table(unlist(sig.ks.genes)))[colnames(xy[,which(xy['Mean',] > 0.8)])]
-
-
-cat(paste(setdiff(g.ks.genes, sig.ks.genes), collapse="\n"))
-xy <- getSampleInfo(setdiff(g.ks.genes, sig.ks.genes), pnet, 'AF')
-xy[,xy['Mean',] > 0.75]
-cat(paste(intersect(g.ks.genes, sig.ks.genes), collapse="\n"))
-xy <- getSampleInfo(intersect(g.ks.genes, sig.ks.genes), pnet, 'AF')
-xy[,xy['Mean',] > 0.75]
-xy[,order(xy['Mean',])]
+combineAf <- function(af, af.all){
+  #af.all <- melt.all.af.mad
+  pre.levels <- levels(af$gene)
   
-
-### End of continuous AF analysis
-###------------
-
-pdf(file.path(pdir, "output", "ks_af.pdf"))
-plot(as.matrix(pnet[['AF']]), as.matrix(pnet[['ks']]), 
-     pch=16, col=alpha("black", 0.5),
-     xlab="Allelic Fraction", ylab="q-value")
-plot(as.matrix(pnet[['AF']][10,,drop=FALSE]), 
-     as.matrix(pnet[['ks']][10,,drop=FALSE]), 
-     xlab="Allelic Fraction", ylab="q-value",
-     pch=16, col=alpha("black", 0.5))
-dev.off()
-pdf(file.path(pdir, "output", "overlap_ksMAD.pdf"))
-v <- venn.diagram(list(mad.p=sig.ks.genes, mad.n=g.ks.genes),
-                  fill = c("orange", "blue"),
-                  alpha = c(0.5, 0.5), cat.cex = 1.5, cex=1.5,
-                  filename=NULL)
-grid.newpage()
-
-## Get significantly imbalanced genes and apply FDR correction
-# Filters out genes with less than a minimum q
-# Filters out genes with fewer than min.samples fraction
-pnet.q <- allelicImbalance(p.mat=pnet[['p']], af.mat=pnet[['AF']], q=0.25)
-ginet.q <- allelicImbalance(p.mat=ginet[['p']], af.mat=ginet[['AF']], q=0.25)
-
-## Overlap imbalanced genes with weighted mean AF rank
-# Filters for only genes in the top quantile
-p.rank.af <- rankWeightedAF(pnet[['AF']], p=1, top=0.75)
-g.rank.af <- rankWeightedAF(ginet[['AF']], p=1)
-
-p.sigq <- intersect(names(pnet.q[['sig.q']]), names(p.rank.af[['top']]))
-g.sigq <- intersect(names(ginet.q[['sig.q']]), names(g.rank.af[['top']]))
-
-pdf(file.path(pdir, "output", "overlap_pnetMAD.pdf"))
-v <- venn.diagram(list(mad.p=p.sigq, mad.n=g.sigq),
-                  fill = c("orange", "blue"),
-                  alpha = c(0.5, 0.5), cat.cex = 1.5, cex=1.5,
-                  filename=NULL)
-grid.newpage()
-grid.draw(v)
-dev.off()
-
-catGenes(setdiff(p.sigq, g.sigq)) ## MAD+ Genes
-catGenes(setdiff(g.sigq, p.sigq)) ## MAD- Genes
-catGenes(intersect(p.sigq, g.sigq)) ## MAD indepedent genes
-
-#### OPTIONAL/VISUALIZATION: Ordered by most unbalanced AF ####
-if(ordering){
-  # Take the average weighted by the number of samples with values; order by that
-  save(all.het.mafs.avg.af,
-       file=file.path(pdir, "output", "pnet_het_snps.Rdata"))
+  # Key -> Value dictionary of gene to chromosome
+  .dict <- strsplit(x=unique(as.character(af$variable)), split = "_")
+  gene.dict <- lapply(.dict, function(i) i[1])
+  names(gene.dict) <- sapply(.dict, function(i) i[2])
   
-  for(ord.type in c('rank', 'sig', 'rank.sig')){
-    switch(ord.type, 
-           rank=gene.ord <- p.rank.af[['order']],  # All rank-based
-           sig=gene.ord <-  match(names(pnet.q[['sig.q']]), colnames(pnet[['AF']])),  # All significant/powered
-           rank.sig=gene.ord <-  match(p.sigq, colnames(pnet[['AF']]))  # Rank based + significant/powered
-    )
-    gene.ord <- head(gene.ord, 50)
-    
-    pnet.het.mat <- pnet[['AF']][,gene.ord]
-    pnet.snps.per.gene <- pnet[['Snps']][,gene.ord]
-    pnet.cov.per.gene <- pnet[['Cov']][,gene.ord]
-    non.na.idx <- apply(pnet.het.mat, 2, function(x) sum(is.na(x)) <= max.num.NA.samples)
-
-    pdf(file.path(pdir, "output", paste0("pnet-het-retained.", ord.type, ".pdf")), width=15)
-    split.screen(c(3, 1))
-    plotMat(pnet.het.mat[,non.na.idx], "", ylab="Alt Allele Fraction", c(1, 4.1, 4.1, 2.1), 1, 1)
-    plotMat(pnet.snps.per.gene[,non.na.idx], "", ylab="Snps per gene", c(0.5, 4.1, 0.5, 2.1), 2, 50)
-    plotMat(pnet.cov.per.gene[,non.na.idx], "", ylab="Cov per gene", c(5.1, 4.1, 0.5, 2.1), 3, 100)
-    axis(side = 1, at=seq(1:length(which(non.na.idx))),
-         labels = colnames(pnet.het.mat)[non.na.idx], las=2, cex.axis=0.5)
-    close.screen(all.screens=TRUE)
-    dev.off()
+  # Extract relevant chromosomes from all Genes
+  keep.idx <- which(af.all$chr %in% sapply(gene.dict, function(i) i ))
+  af.all <- af.all[keep.idx,]
+  
+  # Combine melted structures and re-level
+  af.rbind <- rbind(af, af.all)
+  
+  
+  rle.prelvl <- rle(as.character(gene.dict[pre.levels]))
+  idx <- cumsum(rle.prelvl$lengths)
+  names(idx) <- rle.prelvl$values
+  
+  splitAt <- function(x, pos) unname(split(x, cumsum(seq_along(x) %in% pos)))
+  for(each.idx in seq_along(idx[-1])){
+    spl.lvl <- splitAt(pre.levels, rev(idx)[each.idx + 1]+1)
+    pre.levels <- c(spl.lvl[[1]], 
+                    names(rev(idx)[each.idx]), 
+                    spl.lvl[[2]])
   }
+  pre.levels <- c(names(idx)[1], pre.levels)
   
+  g <- as.character(af.rbind$gene)
+  af.rbind$gene <- factor(g, levels=pre.levels)
+  af.rbind <- af.rbind[order(af.rbind$gene, decreasing = TRUE),]
+  af.rbind
 }
 
-#### VISUALIZATION: Ordered by genomic coord context ####
-non.na.idx <- apply(pnet[['AF']], 2, function(x) sum(is.na(x)) <= max.num.NA.samples)
 
-to.df <- function(x){ data.frame(as.matrix(t(x)), stringsAsFactors=FALSE)  }
-pos.mat <- to.df(all.pos.mat)
-pos.split <- split(pos.mat, f=pos.mat$chr)
+# Boxplot per chromosome of AF for q-value selected genes
+pdf(file.path(pdir, "output", "MAE_qgenes.pdf"))
+split.screen(matrix(c(0, 0.55, 0, 1,
+                      0.55, 1.0, 0, 1), byrow = TRUE, ncol=4))
+screen(1); par(mar=c(5.1, 5.5, 5.1, 0.3))
+boxplot(melt.af.mad$value ~ melt.af.mad$gene, 
+        at = gene.idx, ylim=c(0.37, 1.0),
+        col = alpha("grey", 0.7), horizontal=TRUE,
+        xaxs = FALSE, las=1, outline=FALSE,
+        main="MAD+", xlab="AF", cex.axis=0.7, xaxt='n')
+axis(side = 1, seq(0.5, 1, by=0.1), labels=seq(0.5, 1, by=0.1), cex.axis=0.7)
+axis(side = 1, c(0.35, 0.45), line=-1, tick = FALSE,
+     labels=c(0, min(table(melt.af.mad$gene))), cex.axis=0.7)
+chr.dividers <- setdiff(c(1:max(gene.idx)), gene.idx)
+abline(h = chr.dividers, lty=2, col="grey")
+abline(v = 0.45)
 
-splitNetMatrix <- function(mat, ref, f){
-  df <- to.df(mat)
-  df <- df[match(ref, rownames(df)),]
-  rownames(df) <- ref
-  
-  split(df[match(ref, rownames(df)),], f)
-}
-pval.split <- splitNetMatrix(mat=pnet[['p']], ref=rownames(pos.mat), f=pos.mat$chr)
-af.split <- splitNetMatrix(mat=pnet[['AF']], ref=rownames(pos.mat), f=pos.mat$chr)
-snps.split <- splitNetMatrix(mat=pnet[['Snps']], ref=rownames(pos.mat), f=pos.mat$chr)
-cov.split <- splitNetMatrix(mat=pnet[['Cov']], ref=rownames(pos.mat), f=pos.mat$chr)
+# Add points and colour by filtered/used
+overlapPoints(melt.af.mad, q.mad, 
+              chr.ord, gene.idx, jitter=0.3)
 
-pdf(file.path(pdir, "output", "pnet-het-retained.genomic.pdf"), height=20, width=15)
-chr.ids <- names(af.split)[order(as.numeric(names(af.split)))]
-split.screen(c(length(chr.ids), 1))
-lapply(chr.ids, function(each.chr){
-  pos <- as.numeric(as.character(pos.split[[each.chr]]$start.pos))
-  mu <- apply(af.split[[each.chr]], 1, mean, na.rm=TRUE)  # Mean of gene AF
-  #mu <- apply(af.split[[each.chr]], 1, median, na.rm=TRUE)  # Median of gene AF
-  sd <- apply(af.split[[each.chr]], 1, sd, na.rm=TRUE)
-  sd[is.na(sd)] <- 0.5
-  n <- apply(pval.split[[each.chr]], 1, function(x) sum(!is.na(x))) 
-  n.frac <- n / ncol(pval.split[[each.chr]])
-  alpha.frac <- (0.5-sd)*2 * n.frac
-  
-  screen(grep(paste0("^", each.chr, "$") , chr.ids)); par(mar=c(0.1, 4.1, 0.1, 2.1))
-  plot(x=0, y=0, type='n', xaxt='n',
-       xlim=c(1, chr.size), ylim=c(0.5,1),  las=1,
-       xlab="", ylab=paste0("Chr", each.chr))
-  basal.mu <- (0.5 * exp.hom.frac + 0.5)
-  abline(h = basal.mu, lty=2, col="grey")
-  segments(x0 = pos, y0 = basal.mu, x1 = pos, y1 = mu,
-           col=alpha("grey", (alpha.frac)))
-  points(x=pos, y=mu, pch=16, cex=(1 + alpha.frac^2),
-         col=alpha("gray20", (alpha.frac)))
+screen(2); par(mar=c(5.1, 0.3, 5.1, 2.1))
+boxplot(melt.af.wt$value ~ melt.af.wt$gene, 
+        at = gene.idx, ylim=c(0.37, 1.0),
+        col = alpha("grey", 0.7), horizontal=TRUE,
+        xaxs = FALSE, las=1, outline=FALSE, yaxt='n',
+        main="MAD-", xlab="AF", cex.axis=0.7, xaxt='n')
+axis(side = 1, seq(0.5, 1, by=0.1), labels=seq(0.5, 1, by=0.1), cex.axis=0.7)
+axis(side = 1, c(0.35, 0.45), line=-1, tick = FALSE,
+     labels=c(0, min(table(melt.af.wt$gene))), cex.axis=0.7)
+chr.dividers <- setdiff(c(1:max(gene.idx)), gene.idx)
+abline(h = chr.dividers, lty=2, col="grey")
+abline(v = 0.45)
 
-  psig.mu <- p.sigq[p.sigq %in% names(mu)]
-  qval.chr <- pnet.q[['sig.q']][psig.mu]
-  q.pos <- match(psig.mu, names(mu))
-  if(length(q.pos)>0){
-    ord <- order(pos[q.pos])
-    points(x=pos[q.pos][ord], y=mu[q.pos][ord], pch=16, cex=(1 + alpha.frac[ord]^2),
-           col=alpha("red", (1-qval.chr[ord])))
-    text(x=pos[q.pos][ord], y=rep(c(0.48, 0.9), length(q.pos))[1:length(q.pos)], 
-         labels = names(mu)[q.pos][ord], pos = 3, cex=0.8, col="red")
-  }
-})
+# Add points and colour by filtered/used
+overlapPoints(melt.af.wt, q.wt, 
+              chr.ord, gene.idx, jitter=0.3,
+              print.chr=FALSE)
 close.screen(all.screens = TRUE)
 dev.off()
 
-###------------------------------------------------
-
-gene <- 'SH3RF1'  # each.chr <- '4'
-gene <- 'ZNF708' # each.chr <- '19'
-idx <- grep(gene, rownames(af.split[[each.chr]]))
-x1 <- af.split[[each.chr]][idx,,drop=FALSE]
-t(x1)
-x2 <- af.split[[each.chr]][idx+1,,drop=FALSE]
-t(x2)
-
-x <- af.split[[each.chr]][c((idx-3):(idx+3)),,drop=FALSE]
-do.call("cbind", apply(x, 1, summary))
-
-
-
-library(MASS)
-library(mclust)
-SNPMAT <- snps.split[[each.chr]]
-COVMAT <- cov.split[[each.chr]]
-AFMAT <- af.split[[each.chr]]
-filtMAT <- AFMAT
-filtMAT[SNPMAT < 2] <- NA
-filtMAT[COVMAT < 5] <- NA
-hist(as.numeric(unlist(filtMAT)), na.rm = TRUE, breaks = 25)
