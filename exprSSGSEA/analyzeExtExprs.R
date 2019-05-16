@@ -3,6 +3,11 @@ library(dplyr)
 require(GSVA)
 require(GSEABase)
 require(msigdbr)
+require(TxDb.Hsapiens.UCSC.hg19.knownGene)
+library(org.Hs.eg.db)
+require(BSgenome.Hsapiens.UCSC.hg19)
+require(matrixStats)
+require(scales)
 
 ###################
 #### FUNCTIONS ####
@@ -73,6 +78,7 @@ grpExprMat <- function(gse, cl.spl, group=NULL){
   } else if(group == 'chan'){
     require("hgu133plus2.db")
     ids <- as.list(hgu133plus2SYMBOL[featureNames(gse)])
+    locs <- as.list(hgu133plus2CHRLOC[featureNames(gse)])
     id.df <- t(sapply(seq_along(ids), function(i) c(names(ids)[i], ids[[i]])))
     e.gse <- .cleanExprMat(e.gse, id.df)
   } else {
@@ -186,6 +192,82 @@ grpAndTestSSGSEA <- function(expr.spl, gsc){
                       "genes"=genes))
 }
 
+mapExprsGeneToLoci <- function(e.gse){
+  require(TxDb.Hsapiens.UCSC.hg19.knownGene)
+  require(org.Hs.eg.db)
+  txdb = TxDb.Hsapiens.UCSC.hg19.knownGene # abbreviate
+  gene.gr <- genes(txdb)
+  gene.gr$symbol <- select(org.Hs.eg.db, 
+                           keys=gene.gr$gene_id, 
+                           keytype="ENTREZID", 
+                           columns="SYMBOL")$SYMBOL
+  gene.gr <- as.data.frame(gene.gr)
+  
+  expr.genes <- rownames(e.gse)
+  anno.expr.genes <- gene.gr[match(expr.genes, gene.gr$symbol),
+                             c("seqnames", "start", "end", "symbol")]
+  
+  order.idx <- with(anno.expr.genes, order(seqnames, start))
+  list("order"=order.idx,
+       "anno"=anno.expr.genes[order.idx,])
+}
+
+plotExprZscore <- function(alt.exprs, ref.exprs, 
+                           anno.genes, grp.col, ...){
+  alt.exprs <- alt.exprs[anno.genes[['order']],]
+  ref.exprs <- ref.exprs[anno.genes[['order']],]
+  
+  ## Calculate z-score for all MAD versus WT samples
+  .calcZ <- function(x){ apply(x, 1, scale) }
+  all.exprs <- cbind(alt.exprs, ref.exprs)
+  z.all.exprs <- .calcZ(all.exprs)
+  z.alt.exprs.mu <- colMeans(z.all.exprs[1:ncol(alt.exprs),])
+  z.alt.exprs.sd <- colSds(z.all.exprs[1:ncol(alt.exprs),])
+  
+  z.alt <- data.frame("low"=z.alt.exprs.mu - 1*z.alt.exprs.sd,
+                      "mu"=z.alt.exprs.mu,
+                      "hi"=z.alt.exprs.mu + 1*z.alt.exprs.sd)
+  
+  .getChrLength <- function(genome = "BSgenome.Hsapiens.UCSC.hg19"){
+    g <- getBSgenome(genome, masked=FALSE)
+    seqlengths(g)[1:24]
+  }
+  chr.len <- .getChrLength()
+  chr.len <- rbind(chr.len, c(0, cumsum(as.numeric(chr.len)))[-25])
+  
+  anno.chr <- split(anno.genes[['anno']], f=anno.genes[['anno']]$seqnames)[1:24]
+  z.chr <- split(z.alt, f=anno.genes[['anno']]$seqnames)[1:24]
+  
+  plot(0, type='n', xlim=c(0, sum(chr.len[1,])),
+       xaxt='n', ylab='Z', xlab='', las=2, ...)
+  abline(v=chr.len[2,], lty=2)
+  axis(side = 1, at = (chr.len[2,] + (chr.len[1,]/2)), 
+       labels = colnames(chr.len), 
+       las=2, cex.axis=0.7, tick = FALSE)
+  
+  sapply(names(anno.chr)[1:24], function(chr){
+    chr.spacer <- chr.len[2,grep(paste0("^", chr, "$"), colnames(chr.len))]
+    gene.x <- with(anno.chr[[chr]], chr.spacer + start)
+    z.chr[[chr]]$index <- gene.x
+    loessHiZ50 <- loess(hi ~ index, data=z.chr[[chr]], span=0.50) # 50% smoothing span
+    loessLoZ50 <- loess(low ~ index, data=z.chr[[chr]], span=0.50) # 50% smoothing span
+    loessMuZ50 <- loess(mu ~ index, data=z.chr[[chr]], span=0.50) # 50% smoothing span
+    
+    polygon(x = c(loessLoZ50$x, 
+                  rev(loessHiZ50$x)), 
+            y = c(loessLoZ50$fitted,
+                  rev(loessHiZ50$fitted)),
+            border=NA,
+            col=alpha(grp.col, 0.5))
+    lines(x=loessMuZ50$x, loessMuZ50$fitted, col=grp.col, lwd=2)
+    
+  })
+  
+}
+###################
+#### VARIABLES ####
+pdir <- '/mnt/work1/users/pughlab/projects/NET-SEQ/hgu133a2_array_chan/expr_analysis'
+
 
 ###############################
 #### Sadanadam et al, 2015 ####
@@ -208,6 +290,14 @@ as.matrix(sort(t(sapply(cor.mats, function(i) i[2,]))[,'MAD']))
 centromere.gsc <- genGsc(c("centromere", "kinetochore"))
 grpAndTestSSGSEA(expr.spl[c("MAD", "WT")], centromere.gsc)
 
+anno.genes <- mapExprsGeneToLoci(e.gse)
+
+pdf(file.path(pdir, "sad_exprMAD.pdf"), width = 7, height = 5)
+plotExprZscore(expr.spl[['MAD']], expr.spl[['WT']],
+               anno.genes, '#d95f02', ylim=c(-1, 1))
+dev.off()
+
+
 ##########################
 #### Chan et al, 2018 ####
 setwd("/mnt/work1/users/pughlab/projects/NET-SEQ/external_data/Chan-hgu133a2")
@@ -227,3 +317,9 @@ as.matrix(sort(t(sapply(cor.mats, function(i) i[2,]))[,'MAD']))
 centromere.gsc <- genGsc(c("centromere", "kinetochore"))
 grpAndTestSSGSEA(expr.spl[c("MAD", "WT")], centromere.gsc)
 
+anno.genes <- mapExprsGeneToLoci(e.gse)
+
+pdf(file.path(pdir, "chan_exprMAD.pdf"), width = 7, height = 5)
+plotExprZscore(expr.spl[['MAD']], expr.spl[['WT']],
+               anno.genes, '#7570b3', ylim=c(-1, 1))
+dev.off()
