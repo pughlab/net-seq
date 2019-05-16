@@ -212,6 +212,28 @@ mapExprsGeneToLoci <- function(e.gse){
        "anno"=anno.expr.genes[order.idx,])
 }
 
+plotSSGSEA <- function(ssgsea, grp.col){
+  orig.go <- rownames(ssgsea)
+  rownames(ssgsea) <- c("CEN", paste0("KIN", 1:4))
+  
+  idx <- barplot(ssgsea[,1], col=alpha(grp.col, 0.5), 
+                 xlim=c(-5, 5), border = NA, las=1,
+                 xlab='t-statistic', ylab='', horiz = TRUE)
+  
+  ystar.idx <- idx[which(ssgsea[,2] <= 0.15 & ssgsea[,2] > 0.05)]
+  xstar.idx <- ssgsea[which(ssgsea[,2] <= 0.15 & ssgsea[,2] > 0.05),1]
+  ytwostar.idx <- idx[which(ssgsea[,2] <= 0.05)]
+  xtwostar.idx <- ssgsea[which(ssgsea[,2] <= 0.05),1]
+  
+  text(x = xstar.idx, y=ystar.idx, labels = "*", 
+       pos = if(xstar.idx < 0) 2 else 4, col="black", srt=90)
+  text(x = xtwostar.idx, y=ytwostar.idx, labels = "**", 
+       pos = if(xtwostar.idx < 0) 2 else 4, col="black", srt=90)
+  
+  data.frame("orig"=orig.go,
+             "new"=rownames(ssgsea))
+}
+
 plotExprZscore <- function(alt.exprs, ref.exprs, 
                            anno.genes, grp.col, ...){
   alt.exprs <- alt.exprs[anno.genes[['order']],]
@@ -272,6 +294,7 @@ pdir <- '/mnt/work1/users/pughlab/projects/NET-SEQ/hgu133a2_array_chan/expr_anal
 ###############################
 #### Sadanadam et al, 2015 ####
 setwd("/mnt/work1/users/pughlab/projects/NET-SEQ/external_data/Sadanandam_exprArray")
+grp.col <- '#d95f02'
 
 ## Load Datasets
 gse=getGEO(filename="GSE73338_series_matrix.txt.gz")
@@ -288,19 +311,23 @@ as.matrix(sort(t(sapply(cor.mats, function(i) i[1,]))[,'MAD']))
 as.matrix(sort(t(sapply(cor.mats, function(i) i[2,]))[,'MAD']))
 
 centromere.gsc <- genGsc(c("centromere", "kinetochore"))
-grpAndTestSSGSEA(expr.spl[c("MAD", "WT")], centromere.gsc)
+ssgsea.stats <- grpAndTestSSGSEA(expr.spl[c("MAD", "WT")], centromere.gsc)
 
-anno.genes <- mapExprsGeneToLoci(e.gse)
+pdf(file.path(pdir, "sad_ssgseaMAD.pdf"), width = 6, height = 4)
+plotSSGSEA(ssgsea.stats[['score.test']], grp.col)
+dev.off()
 
 pdf(file.path(pdir, "sad_exprMAD.pdf"), width = 7, height = 5)
+anno.genes <- mapExprsGeneToLoci(e.gse)
 plotExprZscore(expr.spl[['MAD']], expr.spl[['WT']],
-               anno.genes, '#d95f02', ylim=c(-1, 1))
+               anno.genes, grp.col, ylim=c(-1, 1))
 dev.off()
 
 
 ##########################
 #### Chan et al, 2018 ####
 setwd("/mnt/work1/users/pughlab/projects/NET-SEQ/external_data/Chan-hgu133a2")
+grp.col <- '#7570b3'
 
 gse=getGEO(filename="GSE117851_series_matrix.txt.gz")
 soft=getGEO(filename="GSE117851_family.soft.gz")
@@ -315,11 +342,14 @@ as.matrix(sort(t(sapply(cor.mats, function(i) i[1,]))[,'MAD']))
 as.matrix(sort(t(sapply(cor.mats, function(i) i[2,]))[,'MAD']))
 
 centromere.gsc <- genGsc(c("centromere", "kinetochore"))
-grpAndTestSSGSEA(expr.spl[c("MAD", "WT")], centromere.gsc)
+ssgsea.stats <- grpAndTestSSGSEA(expr.spl[c("MAD", "WT")], centromere.gsc)
 
-anno.genes <- mapExprsGeneToLoci(e.gse)
+pdf(file.path(pdir, "chan_ssgseaMAD.pdf"), width = 6, height = 4)
+plotSSGSEA(ssgsea.stats[['score.test']], grp.col)
+dev.off()
 
 pdf(file.path(pdir, "chan_exprMAD.pdf"), width = 7, height = 5)
+anno.genes <- mapExprsGeneToLoci(e.gse)
 plotExprZscore(expr.spl[['MAD']], expr.spl[['WT']],
-               anno.genes, '#7570b3', ylim=c(-1, 1))
+               anno.genes, grp.col, ylim=c(-1, 1))
 dev.off()
