@@ -20,7 +20,7 @@ lohColours <- function(){
     "4"='#489C47')
 }
 
-missegregateChr <- function(){
+missegregateChr <- function(chrs=paste0("chr", 1:22)){
   ## Transcribed and estimated using Inkscape Scaling
   ## directly from Figure 1.I of the Worrell Paper
   ## representing % of Cells for single-cell nocodazole treatment
