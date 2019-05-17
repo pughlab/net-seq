@@ -6,7 +6,48 @@ library(scales)
 library(metap)
 library(mclust)
 
+###################
 #### FUNCTIONS ####
+#Preprocessing functions
+readInWigs <- function(f){
+  wig <- read.table(f, header=FALSE, stringsAsFactors = FALSE, 
+                    check.names=FALSE, sep="\t")
+  colnames(wig) <- c("chr", "start", "end", "peak")
+  wig$peak <- round(wig$peak, 1)
+  makeGRangesFromDataFrame(wig, keep.extra.columns = TRUE)
+}
+overlapGrWithROI <- function(r, gr){
+  print(r)
+  # Isolate for "CEN" regions
+  ov <- findOverlaps(gr, cb[which(cb$CEN == r)])
+  gr.ov <- gr[queryHits(ov),]
+  gr.chrs <- lapply(chrs, function(chr){
+    gr.chr <- gr.ov[seqnames(gr.ov)==chr]
+    
+    # Isolate for groups
+    colids <- colnames(elementMetadata(gr.chr))
+    col.idx <- sapply(grps, function(grp){grep(grp, colids)})
+    
+    tryCatch({
+      gr.chr$tstat <- apply(elementMetadata(gr.chr), 1, function(i){
+        t.test((i[col.idx[,2]]), 
+               (i[col.idx[,1]]), 
+               alternative = 'less')$statistic
+      })
+      gr.chr$pval <- apply(elementMetadata(gr.chr), 1, function(i){
+        t.test((i[col.idx[,2]]), 
+               (i[col.idx[,1]]), 
+               alternative = 'less')$p.value
+      })
+    }, error=function(e){NULL})
+    
+    gr.chr
+  })
+  names(gr.chrs) <- chrs
+  gr.chrs
+}
+
+
 getCENidx <- function(cb, spread=1){
   cen.idx <- which(cb$gieStain == 'acen')
   pcen.idx <- cen.idx[seq(1, length(cen.idx), by=2)]
@@ -95,16 +136,29 @@ lohChr <- function(){
   chrcols[match(ret, chrs)] <- 'white'
   chrcols
 }
+missegregateChr <- function(chrs=paste0("chr", 1:22)){
+  ## Transcribed and estimated using Inkscape Scaling
+  ## directly from Figure 1.I of the Worrell Paper
+  ## representing % of Cells for single-cell nocodazole treatment
+  chrcols <- c(4.75, 2.8, 2.8, 0.8, 0.8, 2.1,
+               0, 2.1, 0.8, 1.5, 2.1, 1.5,
+               2.1, 0, 0, 0, 0.8, 2.8, 0.8,
+               2.1, 0.8, 0.8, 0.8)
+  names(chrcols) <- c(chrs, "chrX")
+  
+  chrcols <- round(chrcols/max(chrcols), 3)
+  chrcols
+}
 makeBox <- function(in.mat){
   in.mat[TRUE] <- 1
   in.mat
 }
 plotBox <- function(cl.data,dat, ...){
+  require(beeswarm)
   boxplot(cl.data, outline=FALSE, las=1, ...)
-  sapply(seq_along(cl.data), function(x){
-    points(runif(length(cl.data[[x]]), min=x-0.1, max=x+0.1),
-           cl.data[[x]], pch=16, col=alpha("black", 0.6))
-  })
+  beeswarm.points <- beeswarm(cl.data, do.plot=FALSE)
+  points(y~x, beeswarm.points, pch=16, col=alpha("black", 0.6))
+  
   p  <- t.test(cl.data[[1]], cl.data[[length(cl.data)]])$p.value
   if(p < 0.05){
     y.val <- switch(dat,
@@ -137,7 +191,6 @@ ROIenrichment <- function(gr, roi.chr, stat){
           ## P = RPKM on chrX (rois) for region I (i)
           P=elementMetadata(i)[,id]
           
-          #t.test(P, Q)$statistic
           switch(stat,
                  "p"=ks.test(P, Q, alternative='less')$p.value,
                  "D"=ks.test(P, Q, alternative='less')$statistic)
@@ -173,6 +226,17 @@ reduceROIenrichment <- function(grps, all.esize, t='fishers'){
   names(reduced.esize) <- grps
   reduced.esize
 }
+runROIpipeline <- function(gr, roi.chr, grps){
+  all.esize <- ROIenrichment(gr, roi.chr, 'p') # stat: p, D
+  reduced.esize <- reduceROIenrichment(grps, all.esize, 'fishers') # t: avg, fishers (combines pval)
+  
+  dval.esize <- ROIenrichment(gr, roi.chr, 'D') # stat: p, D
+  reduced.Dsize <- reduceROIenrichment(grps, dval.esize, 'avg') # t: avg (combines D), fishers
+  
+  list("p"=reduced.esize,
+       "D"=reduced.Dsize)
+}
+
 
 ## t-test reduction of either p-values, or t-statistics
 reduceTtest <- function(roi.chr, stat='p'){
@@ -235,7 +299,8 @@ clusterStats <- function(Dmat, tmat, ord=NULL){
 }
 
 
-#### Load ChIP Data ####
+#########################
+#### Setup ChIP Data ####
 col.param1 <- c(-2, 0, 0, 1) * 10
 col.param2 <- c(-2, 0, 1, 8) * 10
 scaling.factor <- 10000000
@@ -250,13 +315,18 @@ PDIR <- paste0("/mnt/work1/users/pughlab/projects/NET-SEQ/external_data/", proje
 setwd(PDIR)
 chrs <- paste0("chr", c(1:22, "X", "Y"))
 
-readcnt <- read.table("sturgil_reads.csv", sep=",", header=TRUE,
-                      stringsAsFactors = FALSE)
-readcnt$grp <- gsub("^si", "", readcnt$Condition)
-readcnt$rep <- gsub("^.*_", "", readcnt$Experiment)
-read.spl <- split(readcnt, f=readcnt$gr)
+##############
+#### MAIN ####
+if(project == 'Sturgill_CENPA-DAXX'){
+  readcnt <- read.table("sturgil_reads.csv", sep=",", header=TRUE,
+                        stringsAsFactors = FALSE)
+  readcnt$grp <- gsub("^si", "", readcnt$Condition)
+  readcnt$rep <- gsub("^.*_", "", readcnt$Experiment)
+  read.spl <- split(readcnt, f=readcnt$gr)
+}
 
-cbl <- getCENidx(hg19.cytobands, spread=5)
+
+cbl <- getCENidx(hg19.cytobands, spread=1)
 cb <- cbl[['cb']]; roi <- cbl[['roi']]
 
 files <- list.files(PDIR, pattern="wig$")
@@ -266,13 +336,7 @@ if(file.exists("wig_gr.Rdata")){
 } else {
   print(paste0("Generating ", project, " GRanges object..."))
   ## Read in each bedgraph file for each file
-  wig.gr <- lapply(files, function(f){
-    wig <- read.table(f, header=FALSE, stringsAsFactors = FALSE, 
-                      check.names=FALSE, sep="\t")
-    colnames(wig) <- c("chr", "start", "end", "peak")
-    wig$peak <- round(wig$peak, 1)
-    makeGRangesFromDataFrame(wig, keep.extra.columns = TRUE)
-  })
+  wig.gr <- lapply(files, readInWigs)
   names(wig.gr) <- files
   
   mpfiles <- list.files("../", pattern="merged_replicated")
@@ -320,19 +384,20 @@ if(file.exists("wig_gr.Rdata")){
     
     list("peaks"=peaks.gr, "rpkm"=rpkm.gr)
   })
-  peaks.gr <- aggregateGr(lapply(mp.gw, function(i) i[['peaks']]))
-  peaks.gr <- peaks.gr[-which(apply(elementMetadata(peaks.gr), 1, 
-                                    function(i) any(is.na(i)))),]
-  colnames(elementMetadata(peaks.gr)) <- paste0(sort(rep(grps, 4)), "_",
-                                                colnames(elementMetadata(peaks.gr)))
+  names(mp.gw) <- grps
   
-  rpkm.gr <- aggregateGr(lapply(mp.gw, function(i) i[['rpkm']]))
-  rpkm.gr <- rpkm.gr[-which(apply(elementMetadata(rpkm.gr), 1, 
-                                  function(i) any(is.na(i)))),]
-  colnames(elementMetadata(rpkm.gr)) <- paste0(sort(rep(grps, 4)), "_",
-                                               colnames(elementMetadata(rpkm.gr)))
+  .aggregateAndCleanGR <- function(grp){
+    grp.gr <- aggregateGr(lapply(mp.gw, function(i) i[[grp]]))
+    grp.gr <- grp.gr[-which(apply(elementMetadata(grp.gr), 1, 
+                                      function(i) any(is.na(i)))),]
+    colnames(elementMetadata(grp.gr)) <- paste0(sort(rep(grps, 4)), "_",
+                                                  colnames(elementMetadata(grp.gr)))
+    grp.gr
+  }
+  peaks.gr <- .aggregateAndCleanGR('peaks')
+  rpkm.gr <- .aggregateAndCleanGR('rpkm')
   
-  save(rpkm.gr, peaks.gr, file="wig_gr.Rdata")
+  save(rpkm.gr, peaks.gr, mp.gw, file="wig_gr.Rdata")
 }
 
 #### Map RPKM to ROI ####
@@ -341,55 +406,31 @@ control <- switch(p,
                   "2"="H33")
 if(p == '1') gr <- rpkm.gr
 control2 <- 'H3Y'
-roi.chr <- lapply(roi, function(r){
-  print(r)
-  # Isolate for "CEN" regions
-  ov <- findOverlaps(gr, cb[which(cb$CEN == r)])
-  gr.ov <- gr[queryHits(ov),]
-  gr.chrs <- lapply(chrs, function(chr){
-    gr.chr <- gr.ov[seqnames(gr.ov)==chr]
-    
-    # Isolate for groups
-    colids <- colnames(elementMetadata(gr.chr))
-    col.idx <- sapply(grps, function(grp){grep(grp, colids)})
-    
-    tryCatch({
-      gr.chr$tstat <- apply(elementMetadata(gr.chr), 1, function(i){
-        t.test((i[col.idx[,2]]), 
-               (i[col.idx[,1]]), 
-               alternative = 'less')$statistic
-      })
-      gr.chr$pval <- apply(elementMetadata(gr.chr), 1, function(i){
-        t.test((i[col.idx[,2]]), 
-               (i[col.idx[,1]]), 
-               alternative = 'less')$p.value
-      })
-    }, error=function(e){NULL})
-    
-    gr.chr
-  })
-  names(gr.chrs) <- chrs
-  gr.chrs
-})
-names(roi.chr) <- roi
+roi.chr <- lapply(roi, overlapGrWithROI, gr=rpkm.gr) ## RPKM combined
+ctrl.roi.chr <- lapply(roi, overlapGrWithROI, gr=mp.gw[['Control']][['rpkm']]) ## RPKM control
+daxx.roi.chr <- lapply(roi, overlapGrWithROI, gr=mp.gw[['DAXX']][['rpkm']]) ## RPKM daxx
+names(daxx.roi.chr) <- names(ctrl.roi.chr) <- names(roi.chr) <- roi
 
-#### Test enrichment ####
+#### ROI Enrichment ####
+### Checks to see if the centromeric regions are enriched in peaks (RPKM or Max Height)
+# Runs a KS-test for each sample, compares each ROI (e.g. centromere) for each chromosome
+# against the total background distribution (i.e. all RPKM across entire genome)
+# Then combines D-values as average, or p-values using the Fishers method
 len.mat <- sapply(roi.chr, function(i) sapply(i, length))
+rpkm.roi <- runROIpipeline(rpkm.gr, roi.chr, grps) # reduced.esize, reduced.Dsize
+ctrl.rpkm.roi <- runROIpipeline(mp.gw[['Control']][['rpkm']], ctrl.roi.chr, "*") # reduced.esize, reduced.Dsize
+daxx.rpkm.roi <- runROIpipeline(mp.gw[['DAXX']][['rpkm']], daxx.roi.chr, "*") # reduced.esize, reduced.Dsize
 
-## Checks to see if the centromeric regions are enriched in peaks (RPKM or Max Height)
-all.esize <- ROIenrichment(gr, roi.chr, 'p') # stat: p, D
-reduced.esize <- reduceROIenrichment(grps, all.esize, 'fishers') # t: avg, fishers
 
-dval.esize <- ROIenrichment(gr, roi.chr, 'D') # stat: p, D
-reduced.Dsize <- reduceROIenrichment(grps, dval.esize, 'avg') # t: avg, fishers
-
-## Round the t-test p-value
+#### Collapse t-statistics ####
+# Collapses the t-test values between Control and Daxx overlapping peaks
+# using Fishers method for p, or average/sd for t-stat
 t.mat <- reduceTtest(roi.chr, 'p')
 tstat.mat <- reduceTtest(roi.chr, 'stat')
 tstat.sd.mat <- reduceTtest(roi.chr, 'stat.sd')
 
 #### EM clusters of enrichment ####
-control.mat <- reduced.Dsize[['Control']]
+control.mat <- rpkm.roi[['D']][['Control']]
 em.pericen.dt <- clusterStats(control.mat, tstat.mat)
 em.cen.dt <- clusterStats(control.mat[,'cen',drop=FALSE], 
                       tstat.mat[,'cen',drop=FALSE])
@@ -407,7 +448,7 @@ clus.scrn <- split.screen(c(2,6))
 # >> [1,1]: EM clusters (periCEN) - D-bal
 screen(clus.scrn[2]); par(mar=c(1, 2, 4.1, 0))
 p[['em.pericenD']] <- plotBox(em.pericen.dt[['D']], dat='D', 
-                              ylim=c(0,1), ylab="D", xaxt='n')
+                              ylim=c(0,1), ylab="D", xaxt='n', main="periCEN")
 
 # [2,1]: EM clusters (periCEN) - t-stat
 screen(clus.scrn[8]); par(mar=c(5.1, 2, 1, 0))
@@ -418,7 +459,7 @@ p[['em.pericenT']] <- plotBox(em.pericen.dt[['t']], dat='t',
 # >> [1,2]: EM clusters (CEN) - D-bal
 screen(clus.scrn[3]); par(mar=c(1, 2, 4.1, 0))
 p[['em.cenD']] <- plotBox(em.cen.dt[['D']], dat='D', ylim=c(0,1), 
-                          ylab="", xaxt='n', yaxt='n')
+                          ylab="", xaxt='n', yaxt='n', main="CEN")
 
 # [2,2]: EM clusters (CEN) - t-stat
 screen(clus.scrn[9]); par(mar=c(5.1, 2, 1, 0))
@@ -428,27 +469,25 @@ p[['em.cenT']] <- plotBox(em.cen.dt[['t']], dat='t', ylim=c(-2, 2),
 
 # >> [1,3]: LOH clusters (periCEN) - D-bal
 screen(clus.scrn[4]); par(mar=c(1, 2, 4.1, 0))
-p[['loh.pericenD']] <- plotBox(loh.pericen.dt[['D']], dat='D', ylim=c(0,1), 
-                               ylab="", xaxt='n', yaxt='n')
+p[['loh.pericenD']] <- plotBox(loh.pericen.dt[['D']][c(2,1)], dat='D', ylim=c(0,1), 
+                               ylab="", xaxt='n', yaxt='n', main="periCEN")
 
 # [2,3]: LOH clusters (periCEN) - t-stat
 screen(clus.scrn[10]); par(mar=c(5.1, 2, 1, 0))
-p[['loh.pericenT']] <- plotBox(loh.pericen.dt[['t']], dat='t', ylim=c(-2, 2), 
-                               ylab="", yaxt='n',names=c("LOH", "Het"))
+p[['loh.pericenT']] <- plotBox(loh.pericen.dt[['t']][c(2,1)], dat='t', ylim=c(-2, 2), 
+                               ylab="", yaxt='n',names=c("Het", "LOH"))
 
 # >> [1,4]: LOH clusters (CEN) - D-bal
 screen(clus.scrn[5]); par(mar=c(1, 2, 4.1, 0))
-p[['loh.cenD']] <- plotBox(loh.cen.dt[['D']], dat='D', ylim=c(0,1), 
-                           ylab="", xaxt='n', yaxt='n')
+p[['loh.cenD']] <- plotBox(loh.cen.dt[['D']][c(2,1)], dat='D', ylim=c(0,1), 
+                           ylab="", xaxt='n', yaxt='n', main="CEN")
 
 # [2,4]: LOH clusters (CEN) - t-stat
 screen(clus.scrn[11]); par(mar=c(5.1, 2, 1, 0))
-p[['loh.cenT']] <- plotBox(loh.cen.dt[['t']], dat='t', ylim=c(-2, 2), 
-                           ylab="", yaxt='n', names=c("LOH", "Het"))
+p[['loh.cenT']] <- plotBox(loh.cen.dt[['t']][c(2,1)], dat='t', ylim=c(-2, 2), 
+                           ylab="", yaxt='n', names=c("Het", "LOH"))
 close.screen(all.screens=TRUE)
 dev.off()
-
-do.call("rbind", p)
 
 
 
