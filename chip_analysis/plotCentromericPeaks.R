@@ -268,7 +268,9 @@ clusterStats <- function(Dmat, tmat, ord=NULL){
     Dvals <- as.numeric(Dmat)
     tstat.vals <- as.numeric(tmat)
     na.idx <- which(is.na(Dvals))
+    names(Dvals) <- names(tstat.vals) <- gsub("\\.D.*$", "", rownames(Dmat))
     
+    set.seed(1234)
     fit <- Mclust(Dvals[-na.idx])
     ord <- fit$classification
     
@@ -276,14 +278,14 @@ clusterStats <- function(Dmat, tmat, ord=NULL){
     Tstat.split <- split(tstat.vals[-na.idx], f=ord)
   } else {
     Dvals <- lapply(ord, function(chrs.grp){
-      idx <- match(chrs.grp, rownames(Dmat))
-      as.numeric(Dmat[idx,])
+      idx <- which(rownames(Dmat) %in% chrs.grp)
+      Dmat[idx,]
     })
     tstat.vals <- lapply(ord, function(chrs.grp){
-      idx <- match(chrs.grp, rownames(tmat))
-      as.numeric(tmat[idx,])
+      idx <- which(rownames(tmat) %in% chrs.grp)
+      tmat[idx,]
     })
-    
+
     na.idx <- lapply(Dvals, function(i) which(is.na(i)))
     D.split <- lapply(seq_along(na.idx), function(idx){
       Dvals[[idx]][-na.idx[[idx]]]
@@ -291,11 +293,23 @@ clusterStats <- function(Dmat, tmat, ord=NULL){
     Tstat.split <- lapply(seq_along(na.idx), function(idx){
       tstat.vals[[idx]][-na.idx[[idx]]]
     })
+    names(D.split) <- names(Tstat.split) <- names(ord)
   }
   
   
   list("D"=D.split,
        "t"=Tstat.split)
+}
+clusterEnrichment <- function(control.mat, tstat.mat, r='cen', 
+                              ord=NULL, cols=c("#a6cee3", "#1f78b4", "#b2df8a")){
+  em.cen.dt <- clusterStats(control.mat[,r,drop=FALSE], 
+                            tstat.mat[,r,drop=FALSE], ord)
+  em.cen.dt <- data.frame("D"=unlist(em.cen.dt[['D']]),
+                          't'=unlist(em.cen.dt[['t']]),
+                          'grp'=rep(names(em.cen.dt[['D']]), 
+                                    sapply(em.cen.dt[['D']], length)))
+  em.cen.dt$cols <- cols[as.integer(factor(em.cen.dt$grp))]
+  em.cen.dt
 }
 
 
@@ -430,62 +444,41 @@ tstat.mat <- reduceTtest(roi.chr, 'stat')
 tstat.sd.mat <- reduceTtest(roi.chr, 'stat.sd')
 
 #### EM clusters of enrichment ####
+# EM split chromosomes based on regions of high CENPA levels
 control.mat <- rpkm.roi[['D']][['Control']]
-em.pericen.dt <- clusterStats(control.mat, tstat.mat)
-em.cen.dt <- clusterStats(control.mat[,'cen',drop=FALSE], 
-                      tstat.mat[,'cen',drop=FALSE])
+rownames(control.mat) <- gsub("\\..*$", "", rownames(control.mat))
+em.cols <- c("#a6cee3", "#1f78b4", "#b2df8a")
+em.cen.dt <- clusterEnrichment(control.mat, tstat.mat, 
+                               cols=em.cols, r='cen')
 
+# split chromosomes based on LOH or Het
 split.chrs <- lapply(split(lohChr(), factor(lohChr())), names)
-loh.pericen.dt <- clusterStats(control.mat, tstat.mat,
-                      split.chrs)
-loh.cen.dt <- clusterStats(control.mat[,'cen',drop=FALSE], 
-                      tstat.mat[,'cen',drop=FALSE], split.chrs)
+names(split.chrs) <- c("LOH", "Het")
+loh.cols <- c("#33a02c", "#fb9a99")
+loh.cen.dt <- clusterEnrichment(control.mat, tstat.mat, r='cen',
+                                ord=split.chrs, cols=loh.cols)
 
+# Visualization
+pdf(paste0(project, ".enrichBox.pdf"), width = 10, height = 5)
+split.screen(c(1,2))
+screen(1); par(mar=c(5.1, 4.1, 4.1, 1))
+plot(D~t, data=em.cen.dt, col=em.cen.dt$cols, 
+     pch=16, xlim=c(-1.5, 1.5), ylim=c(0,0.6),
+     main="EM Clusters", 
+     ylab="CENPA enrichment (D)", xlab="DAXX-KO CENPA change (t)")
+text(D~t, data=em.cen.dt, labels=gsub("^.*\\.chr", "", rownames(em.cen.dt)), pos=4)
+abline(v = 0, lty=2, col="grey")
+legend("bottomleft", legend = unique(em.cen.dt$grp), fill=em.cols, horiz=TRUE)
 
-p <- list()
-pdf(paste0(project, ".enrichBox.pdf"), width = 9, height = 7)
-clus.scrn <- split.screen(c(2,6))
-# >> [1,1]: EM clusters (periCEN) - D-bal
-screen(clus.scrn[2]); par(mar=c(1, 2, 4.1, 0))
-p[['em.pericenD']] <- plotBox(em.pericen.dt[['D']], dat='D', 
-                              ylim=c(0,1), ylab="D", xaxt='n', main="periCEN")
-
-# [2,1]: EM clusters (periCEN) - t-stat
-screen(clus.scrn[8]); par(mar=c(5.1, 2, 1, 0))
-p[['em.pericenT']] <- plotBox(em.pericen.dt[['t']], dat='t', 
-                              ylim=c(-2, 2), ylab="t-stat")
-
-
-# >> [1,2]: EM clusters (CEN) - D-bal
-screen(clus.scrn[3]); par(mar=c(1, 2, 4.1, 0))
-p[['em.cenD']] <- plotBox(em.cen.dt[['D']], dat='D', ylim=c(0,1), 
-                          ylab="", xaxt='n', yaxt='n', main="CEN")
-
-# [2,2]: EM clusters (CEN) - t-stat
-screen(clus.scrn[9]); par(mar=c(5.1, 2, 1, 0))
-p[['em.cenT']] <- plotBox(em.cen.dt[['t']], dat='t', ylim=c(-2, 2), 
-                          yaxt='n', ylab="")
-
-
-# >> [1,3]: LOH clusters (periCEN) - D-bal
-screen(clus.scrn[4]); par(mar=c(1, 2, 4.1, 0))
-p[['loh.pericenD']] <- plotBox(loh.pericen.dt[['D']][c(2,1)], dat='D', ylim=c(0,1), 
-                               ylab="", xaxt='n', yaxt='n', main="periCEN")
-
-# [2,3]: LOH clusters (periCEN) - t-stat
-screen(clus.scrn[10]); par(mar=c(5.1, 2, 1, 0))
-p[['loh.pericenT']] <- plotBox(loh.pericen.dt[['t']][c(2,1)], dat='t', ylim=c(-2, 2), 
-                               ylab="", yaxt='n',names=c("Het", "LOH"))
-
-# >> [1,4]: LOH clusters (CEN) - D-bal
-screen(clus.scrn[5]); par(mar=c(1, 2, 4.1, 0))
-p[['loh.cenD']] <- plotBox(loh.cen.dt[['D']][c(2,1)], dat='D', ylim=c(0,1), 
-                           ylab="", xaxt='n', yaxt='n', main="CEN")
-
-# [2,4]: LOH clusters (CEN) - t-stat
-screen(clus.scrn[11]); par(mar=c(5.1, 2, 1, 0))
-p[['loh.cenT']] <- plotBox(loh.cen.dt[['t']][c(2,1)], dat='t', ylim=c(-2, 2), 
-                           ylab="", yaxt='n', names=c("Het", "LOH"))
+screen(2); par(mar=c(5.1, 4.1, 4.1, 1))
+plot(D~t, data=loh.cen.dt, col=loh.cen.dt$cols, 
+     pch=16, xlim=c(-1.5, 1.5), ylim=c(0,0.6),
+     main="LOH/Het chr", 
+     ylab="", xlab="DAXX-KO CENPA change (t)", yaxt='n')
+axis(side = 2, at=seq(0, 1, by=0.1), labels=rep("", 11))
+text(D~t, data=loh.cen.dt, labels=gsub("^.*\\.chr", "", rownames(loh.cen.dt)), pos=4)
+abline(v = 0, lty=2, col="grey")
+legend("bottomleft", legend = unique(loh.cen.dt$grp), fill=loh.cols, horiz=TRUE)
 close.screen(all.screens=TRUE)
 dev.off()
 
