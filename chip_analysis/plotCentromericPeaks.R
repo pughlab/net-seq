@@ -438,9 +438,8 @@ plotChrChip <- function(chrs, bin.gr, cols, grp){
 
 #########################
 #### Setup ChIP Data ####
-col.param1 <- c(-2, 0, 0, 1) * 10
-col.param2 <- c(-2, 0, 1, 8) * 10
-scaling.factor <- 10000000
+daxx.col <- '#e7298a'
+control.col <- '#a6761d'
 
 p <- '1'
 project <- switch(p,
@@ -600,15 +599,15 @@ cenpa.diff <- rowDiffs(cbind(ctrl.cnt[,idx], daxx.cnt[,idx]))
 pdf(paste0(project, ".numPeaks.scatterCor.pdf"), width = 5, height = 5)
 idx='cen'
 comp.df <- data.frame(missegregateChr(), daxx.cnt[1:23,idx])
-text.y <- plotScatPlotCor(comp.df, add=FALSE, col=alpha("#d95f02", 0.7), 
+text.y <- plotScatPlotCor(comp.df, add=FALSE, col=alpha(control.col, 0.7), 
                           pch=16, id='siRNA Control',
                           xlab="Misseg. Fraction", ylab="Number of CENPA peaks")
 comp.df <- data.frame(missegregateChr(), ctrl.cnt[1:23,idx])
-plotScatPlotCor(comp.df, add=TRUE, col=alpha("purple", 0.7), 
+plotScatPlotCor(comp.df, add=TRUE, col=alpha(daxx.col, 0.7), 
                 pch=16, text.y=text.y * 0.95, id='siRNA DAXX')
 comp.df <- data.frame(missegregateChr(), cenpa.diff[1:23])
 plotScatPlotCor(comp.df, add=TRUE, col=alpha("black", 0.7), pch=17, 
-                text.y=text.y * 0.9, id='DAXX-Control')
+                text.y=text.y * 0.9, id='DAXX - Control')
 dev.off()
 
 ## Correlation of centromere size with missegregation rate
@@ -636,11 +635,11 @@ daxx.ctrl.rpkm <- sapply(roi.chr, function(r) sapply(r, .averageRpkm))
 
 pdf(paste0(project, ".cenpaRPKM.scatterCor.pdf"), width = 5, height = 5)
 text.y <- plotScatPlotCor(data.frame(missegregateChr(), daxx.rpkm[1:23,'cen']), 
-                          add=FALSE, col=alpha('purple', 0.7), 
+                          add=FALSE, col=alpha(daxx.col, 0.7), 
                           pch=16, id='siRNA DAXX',
                           xlab="Misseg. Fraction", ylab="Average RPKM")
 plotScatPlotCor(data.frame(missegregateChr(), ctrl.rpkm[1:23,'cen']),
-                add=TRUE, col=alpha("#d95f02", 0.7), pch=16, 
+                add=TRUE, col=alpha(control.col, 0.7), pch=16, 
                 text.y=text.y * 0.965, id='siRNA control')
 plotScatPlotCor(data.frame(missegregateChr(), daxx.ctrl.rpkm[1:23,'cen']),
                 add=TRUE, col=alpha("black", 0.7), pch=17, 
@@ -673,9 +672,9 @@ bin.size <- gr.ref.bins[['size']]
 
 pdf(paste0(project, ".bars.pdf"), width = 10, height = 3.5)
 plotChrChip(chrs=chrs, bin.gr=bin.daxx.chr, 
-            col="purple", grp='Rep')
+            col=daxx.col, grp='Rep')
 plotChrChip(chrs=chrs, bin.gr=bin.ctrl.chr, 
-            col="#d95f02", grp='Rep')
+            col=control.col, grp='Rep')
 plotChrChip(chrs=chrs, bin.gr=bin.roi.chr, 
             col="black", 
             grp=c('DAXX', 'Control'))
