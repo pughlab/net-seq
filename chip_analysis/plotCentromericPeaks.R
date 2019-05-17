@@ -5,6 +5,7 @@ library(RColorBrewer)
 library(scales)
 library(metap)
 library(mclust)
+require(matrixStats)
 
 ###################
 #### FUNCTIONS ####
@@ -314,6 +315,27 @@ clusterEnrichment <- function(control.mat, tstat.mat, r='cen',
   em.cen.dt
 }
 
+## Scatterplot with correlations
+plotScatPlotCor <- function(comp.df, add=FALSE, text.y=NULL, 
+                            text.x=1, id=NULL, ...){
+  ct <- cor.test(comp.df[,1], comp.df[,2])
+  if(is.null(text.y)) text.y <- max(comp.df[,2], na.rm=TRUE) * 0.99
+  
+  if(!add){
+    plot(comp.df, ...)
+    if(!is.null(id)) id <- paste0(id, ": ")
+    text(text.x, text.y, pos=2,
+         labels = paste0(id, "r=", round(ct$estimate,2),
+                         ", p=", round(ct$p.value,2)), ...)
+  } else {
+    points(comp.df, ...)
+    if(!is.null(id)) id <- paste0(id, ": ")
+    text(text.x, text.y,
+         labels = paste0(id, "r=", round(ct$estimate,2),
+                         ", p=", round(ct$p.value,2)),pos=2, ...)
+  }
+  text.y
+}
 
 #########################
 #### Setup ChIP Data ####
@@ -471,12 +493,62 @@ dev.off()
 
 
 #### Scatterplots: Correlation of features to Missegregation ####
-# Showing that centromeric regions in siRNA DAXX are more enriched with CENPA sites
+## Correlation of number of CENPA peaks with missegregation rate (CONTROL then DAXX)
 ctrl.cnt <- sapply(ctrl.roi.chr, function(r) sapply(r, length))
 daxx.cnt <- sapply(daxx.roi.chr, function(r) sapply(r, length))
-sapply(c(1:ncol(daxx.cnt)), function(idx){
-  t.test(c(ctrl.cnt[,idx], daxx.cnt[,idx]))$statistic
+cenpa.diff <- rowDiffs(cbind(ctrl.cnt[,idx], daxx.cnt[,idx]))
+
+pdf(paste0(project, ".numPeaks.scatterCor.pdf"), width = 6, height = 6)
+idx='cen'
+comp.df <- data.frame(missegregateChr(), daxx.cnt[1:23,idx])
+text.y <- plotScatPlotCor(comp.df, add=FALSE, col=alpha("#d95f02", 0.7), 
+                          pch=16, id='siRNA Control',
+                          xlab="Misseg. Fraction", ylab="Number of CENPA peaks")
+comp.df <- data.frame(missegregateChr(), ctrl.cnt[1:23,idx])
+plotScatPlotCor(comp.df, add=TRUE, col=alpha("purple", 0.7), 
+                pch=16, text.y=text.y * 0.95, id='siRNA DAXX')
+comp.df <- data.frame(missegregateChr(), cenpa.diff[1:23])
+plotScatPlotCor(comp.df, add=TRUE, col=alpha("black", 0.7), pch=17, 
+                text.y=text.y * 0.9, id='DAXX-Control')
+dev.off()
+
+## Correlation of centromere size with missegregation rate
+pdf(paste0(project, ".cenSize.scatterCor.pdf"), width = 6, height = 6)
+cen.len <- sapply(roi, function(r) {
+  cb.tmp <- cb[which(cb$CEN == r)]
+  sapply(split(cb.tmp, f=seqnames(cb.tmp)), function(i){
+    sum(width(i))
+  })
 })
+text.y <- plotScatPlotCor(data.frame(missegregateChr(), cen.len[1:23,'cen']), 
+                          add=FALSE, col='black', pch=16, id='CEN',
+                          xlab="Misseg. Fraction", ylab="Centromere size")
+plotScatPlotCor(data.frame(missegregateChr(), cen.len[1:23,'pcen1']),
+                add=TRUE, col='red', pch=1, text.y=text.y * 0.975, id='periCEN (p-arm)')
+plotScatPlotCor(data.frame(missegregateChr(), cen.len[1:23,'qcen1']),
+                add=TRUE, col='blue', pch=1, text.y=text.y * 0.95, id='periCEN (q-arm)')
+dev.off()
+
+## Correlation of CENPA expression to missegregation rate
+.averageRpkm <-function(rc){ log2(mean(rowMeans(as.matrix(elementMetadata(rc)))))}
+daxx.rpkm <- sapply(daxx.roi.chr, function(r) sapply(r, .averageRpkm))
+ctrl.rpkm <- sapply(ctrl.roi.chr, function(r) sapply(r, .averageRpkm))
+daxx.ctrl.rpkm <- sapply(roi.chr, function(r) sapply(r, .averageRpkm))
+
+pdf(paste0(project, ".cenpaRPKM.scatterCor.pdf"), width = 6, height = 6)
+text.y <- plotScatPlotCor(data.frame(missegregateChr(), daxx.rpkm[1:23,'cen']), 
+                          add=FALSE, col=alpha('purple', 0.7), 
+                          pch=16, id='siRNA DAXX',
+                          xlab="Misseg. Fraction", ylab="Average RPKM")
+plotScatPlotCor(data.frame(missegregateChr(), ctrl.rpkm[1:23,'cen']),
+                add=TRUE, col=alpha("#d95f02", 0.7), pch=16, 
+                text.y=text.y * 0.975, id='siRNA control')
+plotScatPlotCor(data.frame(missegregateChr(), daxx.ctrl.rpkm[1:23,'cen']),
+                add=TRUE, col=alpha("black", 0.7), pch=17, 
+                text.y=text.y * 0.95, id='overlap peaks')
+dev.off()
+
+
 
 #### Barplot + Line overlay ####
 pdf(paste0(project, ".bars.pdf"), width = 10, height = 3.5)
