@@ -309,6 +309,8 @@ clusterEnrichment <- function(control.mat, tstat.mat, r='cen',
                           'grp'=rep(names(em.cen.dt[['D']]), 
                                     sapply(em.cen.dt[['D']], length)))
   em.cen.dt$cols <- cols[as.integer(factor(em.cen.dt$grp))]
+  em.cen.dt$pch <- 16
+  em.cen.dt$chr <- gsub("^.*\\.", "", rownames(em.cen.dt))
   em.cen.dt
 }
 
@@ -444,48 +446,37 @@ tstat.mat <- reduceTtest(roi.chr, 'stat')
 tstat.sd.mat <- reduceTtest(roi.chr, 'stat.sd')
 
 #### EM clusters of enrichment ####
-# EM split chromosomes based on regions of high CENPA levels
-control.mat <- rpkm.roi[['D']][['Control']]
-rownames(control.mat) <- gsub("\\..*$", "", rownames(control.mat))
-em.cols <- c("#a6cee3", "#1f78b4", "#b2df8a")
-em.cen.dt <- clusterEnrichment(control.mat, tstat.mat, 
-                               cols=em.cols, r='cen')
-
 # split chromosomes based on LOH or Het
 split.chrs <- lapply(split(lohChr(), factor(lohChr())), names)
 names(split.chrs) <- c("LOH", "Het")
 loh.cols <- c("#33a02c", "#fb9a99")
-loh.cen.dt <- clusterEnrichment(control.mat, tstat.mat, r='cen',
-                                ord=split.chrs, cols=loh.cols)
+loh.dt <- do.call("rbind", lapply(roi, function(r){
+  tmp <- clusterEnrichment(control.mat, tstat.mat, r=r,
+                    ord=split.chrs, cols=loh.cols)
+  if(r!='cen') tmp$pch <- 1
+  tmp
+}))
 
 # Visualization
-pdf(paste0(project, ".enrichBox.pdf"), width = 10, height = 5)
-split.screen(c(1,2))
-screen(1); par(mar=c(5.1, 4.1, 4.1, 1))
-plot(D~t, data=em.cen.dt, col=em.cen.dt$cols, 
-     pch=16, xlim=c(-1.5, 1.5), ylim=c(0,0.6),
-     main="EM Clusters", 
+pdf(paste0(project, ".enrichBox.pdf"), width = 5, height = 5)
+plot(D~t, data=loh.dt, col=loh.dt$cols, pch=loh.dt$pch, 
+     xlim=c(-1.5, 1.5), ylim=c(0,0.7), main="LOH/Het chr", 
      ylab="CENPA enrichment (D)", xlab="DAXX-KO CENPA change (t)")
-text(D~t, data=em.cen.dt, labels=gsub("^.*\\.chr", "", rownames(em.cen.dt)), pos=4)
+loh.cen.dt <- loh.dt[which(loh.dt$pch == 16),]
+text(D~t, data=loh.cen.dt, labels=gsub("chr", "", loh.cen.dt$chr), pos=4)
 abline(v = 0, lty=2, col="grey")
-legend("bottomleft", legend = unique(em.cen.dt$grp), fill=em.cols, horiz=TRUE)
-
-screen(2); par(mar=c(5.1, 4.1, 4.1, 1))
-plot(D~t, data=loh.cen.dt, col=loh.cen.dt$cols, 
-     pch=16, xlim=c(-1.5, 1.5), ylim=c(0,0.6),
-     main="LOH/Het chr", 
-     ylab="", xlab="DAXX-KO CENPA change (t)", yaxt='n')
-axis(side = 2, at=seq(0, 1, by=0.1), labels=rep("", 11))
-text(D~t, data=loh.cen.dt, labels=gsub("^.*\\.chr", "", rownames(loh.cen.dt)), pos=4)
-abline(v = 0, lty=2, col="grey")
-legend("bottomleft", legend = unique(loh.cen.dt$grp), fill=loh.cols, horiz=TRUE)
-close.screen(all.screens=TRUE)
+legend("bottomleft", legend = levels(loh.dt$grp), fill=rev(loh.cols), horiz=TRUE)
 dev.off()
 
 
 
-
-
+#### Scatterplots: Correlation of features to Missegregation ####
+# Showing that centromeric regions in siRNA DAXX are more enriched with CENPA sites
+ctrl.cnt <- sapply(ctrl.roi.chr, function(r) sapply(r, length))
+daxx.cnt <- sapply(daxx.roi.chr, function(r) sapply(r, length))
+sapply(c(1:ncol(daxx.cnt)), function(idx){
+  t.test(c(ctrl.cnt[,idx], daxx.cnt[,idx]))$statistic
+})
 
 #### Barplot + Line overlay ####
 pdf(paste0(project, ".bars.pdf"), width = 10, height = 3.5)
