@@ -107,19 +107,6 @@ aggregateGr <- function(list.gr){
 }
 
 # Generates heatmap of peak diff
-drawCens <- function(bp.idx, max.y, 
-                     cencol='cadetblue3', pcencol='cadetblue1'){
-  mid.row <- (nrow(bp.idx)+1)/2
-  rect(xleft = bp.idx[mid.row+1, ]-0.5, ybottom = -100,
-       xright = bp.idx[mid.row+1, ]+0.5, ytop = 100, 
-       col=alpha(pcencol, 0.2), border=NA)
-  rect(xleft = bp.idx[mid.row, ]-0.5, ybottom = -100,
-       xright = bp.idx[mid.row, ]+0.5, ytop = 100, 
-       col=alpha(cencol, 0.3), border=NA)
-  rect(xleft = bp.idx[mid.row-1, ]-0.5, ybottom = -100,
-       xright = bp.idx[mid.row-1, ]+0.5, ytop = 100, 
-       col=alpha(pcencol, 0.2), border=NA)
-}
 rpkm <- function(seg.gr, treads){
   peak.width <- sum(width(seg.gr)) / 1000
   reads <- sum(rep(seg.gr$peak, width(seg.gr)))
@@ -149,10 +136,6 @@ missegregateChr <- function(chrs=paste0("chr", 1:22)){
   
   chrcols <- round(chrcols/max(chrcols), 3)
   chrcols
-}
-makeBox <- function(in.mat){
-  in.mat[TRUE] <- 1
-  in.mat
 }
 plotBox <- function(cl.data,dat, ...){
   require(beeswarm)
@@ -237,7 +220,6 @@ runROIpipeline <- function(gr, roi.chr, grps){
   list("p"=reduced.esize,
        "D"=reduced.Dsize)
 }
-
 
 ## t-test reduction of either p-values, or t-statistics
 reduceTtest <- function(roi.chr, stat='p'){
@@ -335,6 +317,123 @@ plotScatPlotCor <- function(comp.df, add=FALSE, text.y=NULL,
                          ", p=", round(ct$p.value,2)),pos=2, ...)
   }
   text.y
+}
+## RPKM Plots
+# Gets the relative size of each centromere + surrounding regions
+# and returns a scaled down granges with a set bin.size
+getRelativeRoiSize <- function(gr.list, chrs, min.size){
+  chr.sizes <- as.data.frame(t(sapply(chrs, function(chr){
+    se.pos <- sapply(seq_along(gr.list), function(gr.idx){
+      c(min(start(gr.list[[gr.idx]][[chr]])), 
+        max(end(gr.list[[gr.idx]][[chr]])))
+    })
+    se.pos[is.infinite(se.pos)] <- NA
+    c("start"=min(se.pos), "end"=max(se.pos), 
+      "size"=max(se.pos) - min(se.pos))
+  })))
+  
+  chr.sizes[which(chr.sizes$size < min.size),]$size <- min.size
+  rel.size <- with(chr.sizes, ceiling(1/(min(size, na.rm=TRUE) / size)))
+  chr.sizes$rsize <- rel.size 
+  chr.sizes$chr <- rownames(chr.sizes)
+  chr.sizes[is.na(chr.sizes)] <- min(chr.sizes$size, na.rm=TRUE)
+  chr.sizes$csize <- c(1, cumsum(chr.sizes$size)[-nrow(chr.sizes)])
+  
+  chr.bins <- apply(chr.sizes, 1, function(chr.row){
+    .ai <-function(x) {as.integer(as.character(x))}
+    binsize <- (.ai(chr.row['end']) - .ai(chr.row['start'])) / .ai(chr.row['rsize'])
+    pos <- seq(.ai(chr.row['start']), .ai(chr.row['end']), by=binsize)
+    if(binsize == 0){
+      makeGRangesFromDataFrame(data.frame('chrom'=as.character(chr.row['chr']), 
+                                          'start'=1, 'end'=min.size, 'size'=1),
+                               keep.extra.columns = TRUE)
+    } else {
+      makeGRangesFromDataFrame(data.frame('chrom'=rep(as.character(chr.row['chr']), 
+                                                      length(pos)-1), 
+                                          'start'=pos[-length(pos)], 
+                                          'end'=pos[-1]+1,
+                                          'size'=rep(as.character(chr.row['rsize']), 
+                                                     length(pos)-1)),
+                               keep.extra.columns = TRUE)
+    }
+  })
+  list("size"=chr.sizes, "bin"=chr.bins)
+}
+# Aggregates the GRanges for the reference bins and the ROI GRanges
+aggGr <- function(chr, gr1, gr2){
+  ov <- findOverlaps(gr1[[chr]], gr2[['bin']][[chr]])
+  emgr1 <- elementMetadata(gr1[[chr]])
+  emgr2 <- elementMetadata(gr2[['bin']][[chr]])
+  
+  spl.meta <- split(as.data.frame(emgr1[queryHits(ov),]), 
+                    f=subjectHits(ov))
+  collapse.meta <- lapply(spl.meta, function(i) colMeans2(as.matrix(i)))
+  
+  emgr2 <- matrix(nrow=nrow(emgr2), 
+                  ncol=ncol(emgr1))
+  for(idx in seq_along(names(spl.meta))){
+    ridx <- as.integer(names(spl.meta)[idx])
+    emgr2[ridx,] <- collapse.meta[[idx]]
+  }
+  colnames(emgr2) <- colnames(emgr1)
+  elementMetadata(gr2[['bin']][[chr]]) <- emgr2
+  gr2[['bin']][[chr]]
+}
+# Plots
+plotChrChip <- function(chrs, bin.gr, cols, grp){
+  .drawCen <- function(chr, minstart, maxend, spacer){
+    cen.chr <- cb[which(seqnames(cb) == chr & cb$CEN == 'cen'),]
+    cen.loc <- c(min(start(cen.chr)), max(end(cen.chr)))
+    
+    cen.st <- cen.loc[1] - minstart + spacer
+    cen.end <- cen.loc[2] - minstart + spacer
+    min.s <- minstart - minstart + spacer
+    max.e <- maxend - minstart + spacer
+    rect(xleft = if(cen.st > min.s) cen.st else min.s, ybottom = -100, 
+         xright = if(cen.end > max.e) max.e else cen.end, ytop = 100,
+         col=alpha("grey", 0.2), border=NA)
+  }
+  
+  plot(0, type='n', xaxt='n', xlab='', ylab='log10(RPKM)',
+       xlim=c(min(bin.size$csize), max(bin.size$csize)), 
+       ylim=if(length(grp) == 1) c(0,6) else c(-4,4))
+  axis(side = 1, at = bin.size$csize + (bin.size$size / 2), 
+       labels=bin.size$chr, tick = FALSE, las=2, cex.axis=0.7)
+  axis(side = 1, at = bin.size$csize, labels=rep("", nrow(bin.size)))
+  
+  for(chr in chrs){
+    chr.bins <- as.data.frame(bin.gr[[chr]])
+    chr.spacer <- bin.size[match(chr, bin.size$chr),]$csize
+    
+    if(length(grp) == 2){
+      ## Run a comparison between groups
+      col1.idx <- grep(grp[1], colnames(chr.bins))
+      col2.idx <- grep(grp[2], colnames(chr.bins))
+      expr.val <- rowMeans(chr.bins[,col1.idx]) - rowMeans(chr.bins[,col2.idx])
+      col.idx <- c(col1.idx, col2.idx)
+      abline(h = 0, lty=2)
+    } else {
+      col.idx <- grep(grp[1], colnames(chr.bins))
+      expr.val <- rowMeans(chr.bins[,col.idx])
+    }
+    
+    if(any(!is.na(chr.bins[,col.idx]))){
+      bin.s <- chr.bins$start
+      bin.e <- chr.bins$end
+      .drawCen(chr, min(bin.s), max(bin.e), chr.spacer)
+      
+      expr.sign <- integer(length = length(expr.val))
+      expr.sign[which(expr.val > 0)] <- 1
+      expr.sign[which(expr.val < 0)] <- -1
+      rpkm.df <- data.frame(x1=(bin.s - min(bin.s) + chr.spacer), 
+                            x2=(bin.e - min(bin.s) + chr.spacer), 
+                            y1=0, 
+                            y2=expr.sign * log10(abs(expr.val)))
+      with(rpkm.df, rect(xleft = x1, ybottom = y1, 
+                         xright = x2, ytop = y2, 
+                         border=NA, col=cols[1]))        
+    }
+  }
 }
 
 #########################
@@ -498,7 +597,7 @@ ctrl.cnt <- sapply(ctrl.roi.chr, function(r) sapply(r, length))
 daxx.cnt <- sapply(daxx.roi.chr, function(r) sapply(r, length))
 cenpa.diff <- rowDiffs(cbind(ctrl.cnt[,idx], daxx.cnt[,idx]))
 
-pdf(paste0(project, ".numPeaks.scatterCor.pdf"), width = 6, height = 6)
+pdf(paste0(project, ".numPeaks.scatterCor.pdf"), width = 5, height = 5)
 idx='cen'
 comp.df <- data.frame(missegregateChr(), daxx.cnt[1:23,idx])
 text.y <- plotScatPlotCor(comp.df, add=FALSE, col=alpha("#d95f02", 0.7), 
@@ -513,7 +612,7 @@ plotScatPlotCor(comp.df, add=TRUE, col=alpha("black", 0.7), pch=17,
 dev.off()
 
 ## Correlation of centromere size with missegregation rate
-pdf(paste0(project, ".cenSize.scatterCor.pdf"), width = 6, height = 6)
+pdf(paste0(project, ".cenSize.scatterCor.pdf"), width = 5, height = 5)
 cen.len <- sapply(roi, function(r) {
   cb.tmp <- cb[which(cb$CEN == r)]
   sapply(split(cb.tmp, f=seqnames(cb.tmp)), function(i){
@@ -524,9 +623,9 @@ text.y <- plotScatPlotCor(data.frame(missegregateChr(), cen.len[1:23,'cen']),
                           add=FALSE, col='black', pch=16, id='CEN',
                           xlab="Misseg. Fraction", ylab="Centromere size")
 plotScatPlotCor(data.frame(missegregateChr(), cen.len[1:23,'pcen1']),
-                add=TRUE, col='red', pch=1, text.y=text.y * 0.975, id='periCEN (p-arm)')
+                add=TRUE, col='red', pch=1, text.y=text.y * 0.97, id='periCEN (p-arm)')
 plotScatPlotCor(data.frame(missegregateChr(), cen.len[1:23,'qcen1']),
-                add=TRUE, col='blue', pch=1, text.y=text.y * 0.95, id='periCEN (q-arm)')
+                add=TRUE, col='blue', pch=1, text.y=text.y * 0.94, id='periCEN (q-arm)')
 dev.off()
 
 ## Correlation of CENPA expression to missegregation rate
@@ -535,136 +634,59 @@ daxx.rpkm <- sapply(daxx.roi.chr, function(r) sapply(r, .averageRpkm))
 ctrl.rpkm <- sapply(ctrl.roi.chr, function(r) sapply(r, .averageRpkm))
 daxx.ctrl.rpkm <- sapply(roi.chr, function(r) sapply(r, .averageRpkm))
 
-pdf(paste0(project, ".cenpaRPKM.scatterCor.pdf"), width = 6, height = 6)
+pdf(paste0(project, ".cenpaRPKM.scatterCor.pdf"), width = 5, height = 5)
 text.y <- plotScatPlotCor(data.frame(missegregateChr(), daxx.rpkm[1:23,'cen']), 
                           add=FALSE, col=alpha('purple', 0.7), 
                           pch=16, id='siRNA DAXX',
                           xlab="Misseg. Fraction", ylab="Average RPKM")
 plotScatPlotCor(data.frame(missegregateChr(), ctrl.rpkm[1:23,'cen']),
                 add=TRUE, col=alpha("#d95f02", 0.7), pch=16, 
-                text.y=text.y * 0.975, id='siRNA control')
+                text.y=text.y * 0.965, id='siRNA control')
 plotScatPlotCor(data.frame(missegregateChr(), daxx.ctrl.rpkm[1:23,'cen']),
                 add=TRUE, col=alpha("black", 0.7), pch=17, 
-                text.y=text.y * 0.95, id='overlap peaks')
+                text.y=text.y * 0.93, id='overlap peaks')
 dev.off()
 
 
 
 #### Barplot + Line overlay ####
+.combineROI <- function(chr, gr){
+  c(gr[[1]][[chr]], gr[[2]][[chr]], gr[[3]][[chr]])
+}
+
+# Combine the CEN with the periCEN regions
+chrs <- names(roi.chr[[1]])
+all.roi.chr <- sapply(chrs, .combineROI, gr=roi.chr)
+all.ctrl.roi.chr <- sapply(chrs, .combineROI, gr=ctrl.roi.chr)
+all.daxx.roi.chr <- sapply(chrs, .combineROI, gr=daxx.roi.chr)
+
+# Create a reference bin set of a set bin-size
+gr.list <- list(all.roi.chr, all.ctrl.roi.chr, all.daxx.roi.chr)
+gr.ref.bins <- getRelativeRoiSize(gr.list, chrs, min.size=500000)
+
+# Overlap RPKM gr with the reference bins
+bin.roi.chr <- sapply(chrs, aggGr, gr1=all.roi.chr, gr2=gr.ref.bins)
+bin.ctrl.chr <- sapply(chrs, aggGr, gr1=all.ctrl.roi.chr, gr2=gr.ref.bins)
+bin.daxx.chr <- sapply(chrs, aggGr, gr1=all.daxx.roi.chr, gr2=gr.ref.bins)
+
+bin.size <- gr.ref.bins[['size']]
+
 pdf(paste0(project, ".bars.pdf"), width = 10, height = 3.5)
-scrn.idx <- split.screen(matrix(c(0, 1, 0, 0.15,
-                           0, 1, 0.15, 0.6,
-                           0, 1, 0.6, 1), byrow=TRUE, ncol=4))
-xaxis.scrn <- scrn.idx[1]
-tstat.scrn <- scrn.idx[3]  # ROI per chrom RPKM significance
-barplot.scrn <- scrn.idx[2]
-
-## Setup for plots:
-control.bp <- t(reduced.esize[['Control']])
-rois.idx <- match(c("pcen1", "cen", "qcen1"), rownames(control.bp))
-control.bp <- control.bp[rois.idx,]
-
-bp.idx <- barplot(makeBox(control.bp), beside=TRUE, plot = FALSE)
-
-## Plots the t-test statistic for siRNA DAXX compared to control
-screen(tstat.scrn); par(mar=c(0.05, 4.1, 1, 2.1))
-
-t.pvals <- t(t.mat)[rois.idx,]
-t.stats <- t(tstat.mat)[rois.idx,]
-t.sd <- t(tstat.sd.mat)[rois.idx,]
-
-plot(0, type='n', xlim=c(min(bp.idx) - 0.5, 
-                         max(bp.idx) + 0.5), 
-     ylim=c(-5,3), xaxt='n', xlab='',
-     las=1, ylab='t-stat')
-drawCens(bp.idx, 3)
-abline(h = 0, lty=5, col="black")
-
-sapply(chrs, function(chr){
-  print(chr)
-  chr.idx <- match(chr, chrs)
-  x.range <- bp.idx[, chr.idx]
-  
-  segments(x0 = x.range, y0 = t.stats[, chr.idx] - t.sd[, chr.idx], 
-           x1 = x.range, y1 = t.stats[, chr.idx] + t.sd[, chr.idx])
-  points(x=x.range, y=t.stats[, chr.idx],
-         pch=16, col=alpha("black", 0.8))
-  if(any(t.pvals[, chr.idx] < 0.05, na.rm=TRUE)){
-    sig.idx <- which(t.pvals[, chr.idx] < 0.05)
-    y.pos <- t.stats[sig.idx, chr.idx] - t.sd[sig.idx, chr.idx] - 0.5
-    text(x = x.range[sig.idx], y=y.pos, labels="*", col="red")
-
-    # points(x=x.range[sig.idx], y=t.stats[sig.idx, chr.idx],
-    #        pch=16, col=alpha("red", 1))
-  }
-})
-abline(v = (bp.idx[nrow(bp.idx),] + 1), lty=2, col="grey")
-
-
-## Plots the control RPKM across chromosomes and ROI
-screen(barplot.scrn); par(mar=c(0.05, 4.1, 0.05, 2.1))
-
-peaks.roi <- roi.chr[rois.idx]
-control.bp <- t(reduced.esize[['Control']])
-rois.idx <- match(c("pcen1", "cen", "qcen1"), rownames(control.bp))
-control.bp <- control.bp[rois.idx,]
-
-maxy <- 300000
-plot(0, type='n', xlim=c(min(bp.idx) - 0.5, 
-                         max(bp.idx) + 0.5), 
-     ylim=log2(c(1, maxy)), xaxt='n', xlab='',
-     las=1, ylab='Log2(RPKM)')
-drawCens(bp.idx, log2(maxy))
-
-sapply(chrs, function(chr){
-  sapply(roi[rois.idx], function(r){
-    roi.idx <- match(r, rownames(control.bp))
-    chr.idx <- match(chr, chrs)
-    x.range <- bp.idx[roi.idx, chr.idx]
-    
-    peaks.roi <- elementMetadata(roi.chr[[r]][[chr]])
-    # x.space <- round(1/nrow(peaks.roi), 3)
-    
-    if(nrow(peaks.roi) > 0) {
-      grp <- 'Control'; grp.col <- 'grey'
-      grp.idx <- grep(grp, colnames(peaks.roi))
-
-      getQuantile <- function(i, q, log.stat=FALSE){
-        qi <- quantile(as.numeric(unlist(i)), q)
-        if(log.stat) qi <- log2(qi)
-        qi
-      }
-      hiq <- getQuantile(peaks.roi[,grp.idx], 0.75, TRUE)
-      loq <- getQuantile(peaks.roi[,grp.idx], 0.25, TRUE)
-      med <- getQuantile(peaks.roi[,grp.idx], 0.5, TRUE)
-      
-      rect(xleft = x.range - 0.5, ybottom = loq,
-           xright = x.range + 0.5, ytop = hiq, 
-           border=TRUE, col=grp.col, lwd=0.5)
-      segments(x0 = x.range - 0.5, y0 = med,
-               x1 = x.range + 0.5, y1 = med)
-      
-      if(is.na(control.bp[roi.idx, chr.idx])) control.bp[roi.idx, chr.idx] <- 1
-      if(control.bp[roi.idx, chr.idx] < 0.05){
-        text(x = x.range, y=hiq + 1, labels = "*", col="red")
-      }
-    }
-  })
-})
-abline(v = (bp.idx[nrow(bp.idx),] + 1), lty=2, col="grey")
-
-
-
-
-## Labels chromosomes
-screen(xaxis.scrn); par(mar=c(1.1, 4.1, 0.05, 2.1))
-plot(0, type='n', xaxt='n', yaxt='n', ylab='', xlab='', axes=FALSE,
-     xlim=c(min(bp.idx) - 0.5, max(bp.idx) + 0.5), ylim=c(0,1))
-text(x=bp.idx[2,], y=rep(0.5, ncol(bp.idx)), 
-     labels = chrs, srt=90, cex=0.7)
-
-close.screen(all.screens=TRUE)
+plotChrChip(chrs=chrs, bin.gr=bin.daxx.chr, 
+            col="purple", grp='Rep')
+plotChrChip(chrs=chrs, bin.gr=bin.ctrl.chr, 
+            col="#d95f02", grp='Rep')
+plotChrChip(chrs=chrs, bin.gr=bin.roi.chr, 
+            col="black", 
+            grp=c('DAXX', 'Control'))
 dev.off()
+
+
+
+
+
+
+
 
 
 
