@@ -22,6 +22,13 @@ lohColours <- function(){
     "4"='#489C47')
 }
 
+log2Cols <- function(min.l2=-2, max.l2=2){
+  crp.lvl <- seq(min.l2, max.l2, by=0.1)
+  crp <- colorRampPalette(c("blue", "white", "red"))(length(crp.lvl))
+  names(crp) <- crp.lvl
+  crp
+}
+
 missegregateChr <- function(chrs=paste0("chr", 1:22)){
   ## Transcribed and estimated using Inkscape Scaling
   ## directly from Figure 1.I of the Worrell Paper
@@ -58,24 +65,27 @@ plotBlank <- function(chr, xlim=c(0,1), ylim=NULL){
        axes=FALSE, lty=0, ylab='', xlab='')
 }
 
-plotChr <- function(chr, only.loh=FALSE, log2.range=NULL){
+plotChr <- function(chr, only.loh=FALSE, log2.range=FALSE){
   plotBlank(chr)
   
-  .doPlot <- function(alpha=1){
+  .doPlot <- function(alpha=1, col.scheme=NULL){
+    if(is.null(col.scheme)) cols <- lohColours() else cols <- col.scheme
     if(is.null(loh.tmp)) loh.tmp <- matrix(nrow = 0, ncol=1)
     if(nrow(loh.tmp) > 0){
       if(any(loh.tmp$CNt > 3) && each.disease != 'ccl') loh.tmp[which(loh.tmp$CNt > 3),]$CNt <- 3
       rect(xleft = 0, ybottom = (-1 * as.integer(loh.tmp$Start.bp)), 
            xright = 1, ytop = (-1 * as.integer(loh.tmp$End.bp)), 
            border=NA, 
-           col=alpha(lohColours()[as.character(loh.tmp$CNt)], alpha))
+           col=alpha(cols[as.character(loh.tmp$CNt)], alpha))
     }
   }
   if(only.loh){
     loh.tmp <- remove.factors(seg.spl[[chr]][which(seg.spl[[chr]]$LOH == 1),])
     .doPlot(alpha=1)
-  } else if(!is.null(log2.range)){
-    1
+  } else if(log2.range){
+    loh.tmp <- remove.factors(seg.spl[[chr]])
+    loh.tmp$CNt <- round(loh.tmp$CNt, 1)
+    .doPlot(alpha=1, col.scheme=log2Cols())
   } else if(!only.loh) {
     loh.tmp <- remove.factors(seg.spl[[chr]][which(seg.spl[[chr]]$LOH == 1),])
     .doPlot(alpha=1)
@@ -167,7 +177,12 @@ mut.table <- read.csv("~/git/net-seq/cgh_analysis/data/pnet_mutations.csv",
                       header=TRUE, stringsAsFactors = FALSE, check.names = FALSE)
 load("~/git/net-seq/cgh_analysis/data/chromInfo.Rdata")
 load("~/git/net-seq/cgh_analysis/data/data.aggregateLoh.pnets.Rdata")
+load("~/git/net-seq/cgh_analysis/data/genie_cn.Rdata")
+load("~/git/net-seq/cgh_analysis/data/genie_mut.Rdata")
+disease.list[['genie']] <- genie.cn_ord
+
 out.dir <- file.path("/mnt/work1/users/pughlab/projects/NET-SEQ/loh_signature/plots", "loh_plots")
+out.dir <- '~/Desktop'
 dir.create(out.dir)
 
 only.loh <- FALSE # Set to FALSE if you want to plot nonLOH CN too
@@ -180,12 +195,12 @@ chr.cex <- 0.7
 
 bisir <- biserial.cor(missegregateChr()[-23], as.integer(factor(lohChr())))
 
-##################
-#### Plotting ####
-disease.names <- c("pnets", "otb-pnet", "ccl")
-for(each.disease in disease.names){
+######################
+#### Plotting LOH ####
+#disease.names <- c("pnets", "otb-pnet", "ccl")
+for(each.disease in names(disease.list)){
   pdf(file.path(out.dir, paste0(each.disease, "_loh.pdf")), 
-      height = 7, width = 2 + (0.3 * length(names(disease.list[[each.disease]]))))
+      height = 7, width = 2 + (0.02 * length(names(disease.list[[each.disease]]))))
 
 
   if(each.disease == 'pnets'){
@@ -246,7 +261,12 @@ for(each.disease in disease.names){
       } else {
         ## Plot group inclusion
         sid <- names(disease.list[[each.disease]])[disease.idx]
-        muts <- mut.table[,match(sid, colnames(mut.table))]
+        if(each.disease=='genie'){
+          muts <- genie.mut_ord[,match(sid, colnames(genie.mut_ord))]
+        } else {
+          muts <- mut.table[,match(sid, colnames(mut.table))]
+        }
+        
         muts[is.na(muts)] <- "NA"
         idx <- list(c(0,1), c(1,2), c(2,3), c(3,4))
         
@@ -313,12 +333,14 @@ for(each.disease in disease.names){
         seg <- fixSeg(seg) # Sets CNt, length, and standardizes Chr name
         
         gen.loh[[disease.idx]] <- sum(seg[which(seg$LOH==1),]$length) / total.genome.size
+        if(each.disease == 'genie') gen.loh[[disease.idx]] <- 0
         seg.spl <- split(seg, f=seg$Chromosome)
         
         chr.scrn <- split.screen(c(length(chrs), 1))
         lapply(chrs, function(chr){
           screen(chr.scrn[match(chr, chrs)]); par(mar=p)
-          plotChr(chr, only.loh=only.loh)
+          plotChr(chr, only.loh=only.loh, 
+                  log2.range=if(each.disease == 'genie') TRUE else FALSE)
         })
       }
     }
@@ -355,3 +377,7 @@ for(each.disease in disease.names){
   }
   dev.off()
 }
+
+#############
+#### PWM ####
+
