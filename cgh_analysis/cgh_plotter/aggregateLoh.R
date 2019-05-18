@@ -1,6 +1,8 @@
-library(taRifx)
+library(taRifx) #remove.factors
 library(scales)
 library(ltm)
+
+###################
 #### FUNCTIONS ####
 mutColours <- function(){
  list("INS"="#82CABC",
@@ -15,7 +17,7 @@ mutColours <- function(){
 lohColours <- function(){
   c("0"=alpha('white', 0),
     "1"='dodgerblue',
-    "2"='thistle',
+    "2"='#1b9e77',
     "3"='red',
     "4"='#489C47')
 }
@@ -56,16 +58,31 @@ plotBlank <- function(chr, xlim=c(0,1), ylim=NULL){
        axes=FALSE, lty=0, ylab='', xlab='')
 }
 
-plotChr <- function(chr){
+plotChr <- function(chr, only.loh=FALSE, log2.range=NULL){
   plotBlank(chr)
-  loh.tmp <- remove.factors(seg.spl[[chr]][which(seg.spl[[chr]]$LOH == 1),])
-  if(is.null(loh.tmp)) loh.tmp <- matrix(nrow = 0, ncol=1)
-  if(nrow(loh.tmp) > 0){
-    if(any(loh.tmp$CNt > 3) && each.disease != 'ccl') loh.tmp[which(loh.tmp$CNt > 3),]$CNt <- 3
-    rect(xleft = 0, ybottom = (-1 * as.integer(loh.tmp$Start.bp)), 
-         xright = 1, ytop = (-1 * as.integer(loh.tmp$End.bp)), 
-         border=NA, col=lohColours()[as.character(loh.tmp$CNt)])
+  
+  .doPlot <- function(alpha=1){
+    if(is.null(loh.tmp)) loh.tmp <- matrix(nrow = 0, ncol=1)
+    if(nrow(loh.tmp) > 0){
+      if(any(loh.tmp$CNt > 3) && each.disease != 'ccl') loh.tmp[which(loh.tmp$CNt > 3),]$CNt <- 3
+      rect(xleft = 0, ybottom = (-1 * as.integer(loh.tmp$Start.bp)), 
+           xright = 1, ytop = (-1 * as.integer(loh.tmp$End.bp)), 
+           border=NA, 
+           col=alpha(lohColours()[as.character(loh.tmp$CNt)], alpha))
+    }
   }
+  if(only.loh){
+    loh.tmp <- remove.factors(seg.spl[[chr]][which(seg.spl[[chr]]$LOH == 1),])
+    .doPlot(alpha=1)
+  } else if(!is.null(log2.range)){
+    1
+  } else if(!only.loh) {
+    loh.tmp <- remove.factors(seg.spl[[chr]][which(seg.spl[[chr]]$LOH == 1),])
+    .doPlot(alpha=1)
+    loh.tmp <- remove.factors(seg.spl[[chr]][which(seg.spl[[chr]]$LOH == 0),])
+    .doPlot(alpha=0.1)
+  }
+  
 }
 
 plotChrAxis <- function(chr){
@@ -79,8 +96,8 @@ plotChrAxis <- function(chr){
   
   if(each.disease == 'pnets'){
     if(chr=='chr1') text(x=c(2,4), y=c(9.5, 9.5), labels=c("L", "M"), cex=0.5)
-    points(x=4, y=4, bg=alpha("black", missegregateChr()[chr]), pch=21)
-    points(x=2, y=4, bg=lohChr()[chr], pch=21)
+    #points(x=4, y=4, bg=alpha("black", missegregateChr()[chr]), pch=21)
+    #points(x=2, y=4, bg=lohChr()[chr], pch=21)
   }
 }
 
@@ -144,12 +161,16 @@ rmFactor <- function(x){
   as.numeric(as.character(x))
 }
 
-
+###################
 #### VARIABLES ####
 mut.table <- read.csv("~/git/net-seq/cgh_analysis/data/pnet_mutations.csv",
                       header=TRUE, stringsAsFactors = FALSE, check.names = FALSE)
 load("~/git/net-seq/cgh_analysis/data/chromInfo.Rdata")
 load("~/git/net-seq/cgh_analysis/data/data.aggregateLoh.pnets.Rdata")
+out.dir <- file.path("/mnt/work1/users/pughlab/projects/NET-SEQ/loh_signature/plots", "loh_plots")
+dir.create(out.dir)
+
+only.loh <- FALSE # Set to FALSE if you want to plot nonLOH CN too
 
 ucsc.spl <- split(ucsc.chrom, f=ucsc.chrom$chrom)
 chrs <- paste0("chr", c(1:22))
@@ -159,9 +180,11 @@ chr.cex <- 0.7
 
 bisir <- biserial.cor(missegregateChr()[-23], as.integer(factor(lohChr())))
 
+##################
+#### Plotting ####
 disease.names <- c("pnets", "otb-pnet", "ccl")
 for(each.disease in disease.names){
-  pdf(paste0("~/Desktop/netseq/loh-cn/", each.disease, "_loh.pdf"), 
+  pdf(file.path(out.dir, paste0(each.disease, "_loh.pdf")), 
       height = 7, width = 2 + (0.3 * length(names(disease.list[[each.disease]]))))
 
 
@@ -189,6 +212,7 @@ for(each.disease in disease.names){
     
   }
   
+  #######################
   #### VISUALIZATION ####
   {
     close.screen(all.screens=TRUE)
@@ -203,7 +227,6 @@ for(each.disease in disease.names){
     
     #### Mutation ####
     ## Plot the Mutation track
-  
     screen(mut.screen)
     dis.scrn <- split.screen(c(1, (length(disease.list[[each.disease]]) + 1)))
     for(disease.idx in dis.scrn){
@@ -287,7 +310,7 @@ for(each.disease in disease.names){
       } else {
         ## Plot individual sample LOH per chromosome
         seg <- disease.list[[each.disease]][[disease.idx]]
-        seg <- fixSeg(seg)
+        seg <- fixSeg(seg) # Sets CNt, length, and standardizes Chr name
         
         gen.loh[[disease.idx]] <- sum(seg[which(seg$LOH==1),]$length) / total.genome.size
         seg.spl <- split(seg, f=seg$Chromosome)
@@ -295,7 +318,7 @@ for(each.disease in disease.names){
         chr.scrn <- split.screen(c(length(chrs), 1))
         lapply(chrs, function(chr){
           screen(chr.scrn[match(chr, chrs)]); par(mar=p)
-          plotChr(chr)
+          plotChr(chr, only.loh=only.loh)
         })
       }
     }
