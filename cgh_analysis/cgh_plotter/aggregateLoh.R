@@ -1,6 +1,7 @@
 library(taRifx) #remove.factors
 library(scales)
 library(ltm)
+require(gglogo)
 
 ###################
 #### FUNCTIONS ####
@@ -380,4 +381,160 @@ for(each.disease in names(disease.list)){
 
 #############
 #### PWM ####
+l=1:5
 
+assignGroupIds <- function(mtbl, ids=NULL){
+  mut.map <- c("MEN1"="M1", "DAXX"="D", "ATRX"="A", "TP53"="T")
+  mut <- apply(mtbl, 2, function(i){
+    paste(mut.map[names(which(!is.na(i)))], collapse="")
+  })
+  if(!is.null(ids)){
+    id.bool <- sapply(ids, function(i) grep(i, mut))
+    id.bool <- unique(sort(unlist(id.bool)))
+    mut <- character(length(mut))
+    mut[id.bool] <- paste(ids, collapse="")
+    names(mut) <- colnames(mtbl)
+  }
+  mut
+}
+assignChromCnStat <- function(seg, stat){
+  .isWholeInt <- function(x){as.numeric(x)%%1==0}
+  seg <- remove.factors(seg)
+  seg <- fixSeg(seg)
+  seg$Chromosome <- factor(as.character(seg$Chromosome), chrs)
+  seg.spl <- split(seg, f=seg$Chromosome)
+  
+  sapply(seg.spl, function(seg.chr){
+    seg.len <- sum(seg.chr$length)
+    
+    if(stat == 'loh'){
+      loh.idx <- which(seg.chr$LOH == 1)
+      loh.frac <- sum(seg.chr[loh.idx,]$length) / seg.len
+      if(loh.frac > chr.thresh) 'LOH' else 'Het'
+    } else if(stat == 'cn'){
+      if(all(.isWholeInt(seg.chr$CNt))){
+        l.idx <- seg.chr$CNt <= 1
+        n.idx <- seg.chr$CNt == 2
+        g.idx <- seg.chr$CNt >= 3
+      } else {
+        l.idx <- seg.chr$CNt <= -0.2
+        n.idx <- with(seg.chr, CNt > -0.2 & CNt < 0.2)
+        g.idx <- seg.chr$CNt >= 0.2
+      }
+      
+      cn.frac <- c("Loss"=sum(seg.chr[l.idx,]$length) / seg.len,
+                   "Neutral"=sum(seg.chr[n.idx,]$length) / seg.len,
+                   "Gain"=sum(seg.chr[g.idx,]$length) / seg.len)
+      names(which.max(cn.frac))
+    } else {
+      stop("'stat' must be either 'loh' or 'cn'")
+    }
+  })
+}
+splitMat <- function(grps, mats){
+  lapply(grps, function(ids){
+    m.idx <- match(names(ids), colnames(mats))
+    if(any(is.na(m.idx))) m.idx <- m.idx[which(!is.na(m.idx))]
+
+    if(length(m.idx) > 0){
+      mats[,m.idx, drop=FALSE]
+    } else { 
+      na.m <- as.matrix(rep(NA, nrow(mats)))
+      rownames(na.m) <- rownames(mats)
+      na.m
+    }
+  })
+}
+plotPWM <- function(ppm, cols){
+  ic <- ppm2ic(ppm)
+  plot(0, type='n', xlim=c(0, ncol(ppm)), 
+       ylim=c(0, log2(nrow(ppm))),
+       xaxt='n', ylab='bits', las=2, xlab='')
+  axis(side = 1, at = seq(0.5, ncol(ppm)-0.5, by=1),
+       labels=colnames(ppm), las=2, cex.axis=0.7)
+  ##Setup
+  l <- substr(rownames(ppm), 1, 1)
+  letters <- lapply(l, createPolygons, font='Arial')
+  names(letters) <- l
+  #cols <- c("red", "blue", "green"); #names(cols) <-  l
+  
+  
+  # Go through each chromosome
+  sapply(seq_along(ic), function(idx){
+    ppm.ord <- sort(ppm[,idx])
+    # Go through each letter and plot it for chr[X]
+    sapply(seq_along(ppm.ord), function(ridx){
+      y.height <- ic[idx] * ppm.ord
+      y.scale <- y.height[ridx]
+      y.adj <- sum(c(0, y.height[0:(ridx-1)]))
+      
+      letter.id <- substr(names(ppm.ord)[ridx], 1, 1)
+      with(letters[[letter.id]], polygon(x=x + (idx - 1),
+                                         y=(y*y.scale) + y.adj,
+                                         col=cols[letter.id], border = NA))
+      
+    })
+  })
+}
+ppm2ic <- function(pwm){
+  npos <- ncol(pwm)
+  ic <- numeric(length = npos)
+  for (i in 1:npos) {
+    ic[i] <- log2(nrow(pwm)) + sum(sapply(pwm[, i], function(x) {
+      if (x > 0) {
+        x * log2(x)
+      } else {
+        0
+      }
+    }))
+  }
+  ic
+}
+getPpm <- function(mat, lvl){
+  .tbl2Df <- function(i){as.data.frame(t(as.matrix(i)))}
+
+  cnts <- apply(mat, 1, function(i) .tbl2Df(table(i)))
+  cnts[['levels']] <- data.frame(t(rep(NA, length(lvl))))
+  colnames(cnts[['levels']]) <- lvl
+  mat.cnt <- rbind.fill(cnts)[-length(cnts),]
+  
+  mat.ppm <- apply(mat.cnt, 1, function(i) i / sum(i, na.rm=TRUE))
+  colnames(mat.ppm) <- rownames(mat)
+  mat.ppm[is.na(mat.ppm)] <- 0
+  
+  mat.ppm
+}
+
+rownames(mut.table) <- mut.table$Genes
+loh.grp.ids <- assignGroupIds(mut.table[,-1])
+loh.mad.ids <- assignGroupIds(mut.table[,-1], c('M1', 'A', 'D'))
+genie.grp.ids <- assignGroupIds(genie.mut_ord)
+genie.mad.ids <- assignGroupIds(genie.mut_ord, c('M1', 'A', 'D'))
+loh.grp.spl <- split(loh.grp.ids, f=loh.grp.ids)
+loh.grp.spl[['M1AD']] <- split(loh.mad.ids, f=loh.mad.ids)[['M1AD']]
+cn.grp.spl <- split(genie.grp.ids, f=genie.grp.ids)
+cn.grp.spl[['M1AD']] <- split(genie.mad.ids, f=genie.mad.ids)[['M1AD']]
+
+loh.mat <- lapply(disease.list[1:2], function(d) sapply(d, assignChromCnStat, stat='loh'))
+cn.mat <- lapply(disease.list[c(1,2,4)], function(d) sapply(d, assignChromCnStat, stat='cn'))
+loh.mat <- do.call("cbind", loh.mat)
+cn.mat <- do.call("cbind", cn.mat)
+
+cn.spl <- splitMat(cn.grp.spl, cn.mat)
+loh.spl <- splitMat(loh.grp.spl, loh.mat)
+
+.getLevels <- function(x) {unique(sort(unlist(x)))}
+cn.ppms <- lapply(cn.spl, getPpm, lvl=.getLevels(cn.mat))
+loh.ppms <- lapply(loh.spl, getPpm, lvl=.getLevels(loh.mat))
+
+pdf("~/Desktop/cn-bits.pdf", width=8, height=3)
+cn.cols <- lohColours()
+names(cn.cols) <- c("x", "L", "N", "G", "y")
+sapply(cn.ppms[c(1, length(cn.ppms))], plotPWM, cols=cn.cols)
+dev.off()
+
+pdf("~/Desktop/loh-bits.pdf", width=8, height=3)
+loh.cols <- c("black", "grey")
+names(loh.cols) <- c("L", "H")
+sapply(loh.ppms['M1AD'], plotPWM, cols=loh.cols)
+dev.off()
