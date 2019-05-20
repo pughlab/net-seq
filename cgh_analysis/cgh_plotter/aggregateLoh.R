@@ -618,6 +618,7 @@ names(loh.cols) <- c("L", "H")
 sapply(loh.ppms['M1AD'], plotPWM, cols=loh.cols)
 dev.off()
 
+#############################
 #### Co-occurence Matrix ####
 ## Binarize the feature by sample matrix
 lvl <- c("Loss", "Neutral", "Gain") # lvl <- .getLevels(cn.mat)
