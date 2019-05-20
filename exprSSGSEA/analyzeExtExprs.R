@@ -416,6 +416,12 @@ pdf(file.path(pdir, "chan_ssgseaMAD.pdf"), width = 6, height = 4)
 plotSSGSEA(ssgsea.stats[['score.test']], grp.col)
 dev.off()
 
+pdf(file.path(pdir, "ssgseaGeneSets.pdf"), width = 10)
+plot(0, type='n', xlim=c(0,10), ylim=c(0,10), axes=FALSE, xlab='', ylab='')
+text(x = 2, y=seq(1,10,by=2), labels=c("CEN", paste0("KIN", 1:4)), pos=2)
+text(x = 10, y=seq(1,10,by=2), labels=names(ssgsea.stats$geneset$n), pos=2)
+dev.off()
+
 ## Generate z-score expression plots showing copy-number
 pdf(file.path(pdir, "chan_exprMAD.pdf"), width = 7, height = 5)
 anno.genes <- mapExprsGeneToLoci(e.gse)
