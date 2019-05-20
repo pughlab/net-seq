@@ -521,16 +521,19 @@ loh.mat <- do.call("cbind", loh.mat)
 cn.mat <- do.call("cbind", cn.mat)
 
 cn.spl <- splitMat(cn.grp.spl, cn.mat)
+cn.loh.spl <- splitMat(loh.grp.spl, cn.mat)
 loh.spl <- splitMat(loh.grp.spl, loh.mat)
 
 .getLevels <- function(x) {unique(sort(unlist(x)))}
 cn.ppms <- lapply(cn.spl, getPpm, lvl=.getLevels(cn.mat))
+cn.loh.ppms <- lapply(cn.loh.spl, getPpm, lvl=.getLevels(cn.mat))
 loh.ppms <- lapply(loh.spl, getPpm, lvl=.getLevels(loh.mat))
 
 pdf("~/Desktop/cn-bits.pdf", width=8, height=3)
 cn.cols <- lohColours()
 names(cn.cols) <- c("x", "L", "N", "G", "y")
 sapply(cn.ppms[c(1, length(cn.ppms))], plotPWM, cols=cn.cols)
+sapply(cn.loh.ppms[c(1, length(cn.loh.ppms))], plotPWM, cols=cn.cols)
 dev.off()
 
 pdf("~/Desktop/loh-bits.pdf", width=8, height=3)
