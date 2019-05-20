@@ -23,6 +23,12 @@ lohColours <- function(){
     "4"='#489C47')
 }
 
+transColours <- function(){
+  c("positive"="#ABDAE3",
+    "random"="#AFACB2",
+    "negative"="#FFC86E")
+}
+
 log2Cols <- function(min.l2=-2, max.l2=2){
   crp.lvl <- seq(min.l2, max.l2, by=0.1)
   crp <- colorRampPalette(c("blue", "white", "red"))(length(crp.lvl))
@@ -170,6 +176,76 @@ fixSeg <- function(seg){
 
 rmFactor <- function(x){
   as.numeric(as.character(x))
+}
+
+## Compute all features by features cooccurence matrix
+calcCo <- function(i,j,rand=FALSE){
+  if(rand){
+    i = i[sample(x=seq_along(i), size=length(i), replace = TRUE)]
+    j = j[sample(x=seq_along(j), size=length(j), replace = TRUE)]
+  }
+  sum((i==1) & (j==1))/length(i)
+}
+
+genCoMat <- function(mat.x, rand=FALSE, N=1000){
+  if(rand){
+    co.mat <- lapply(1:N, function(n){
+      apply(mat.x, 1, function(i, ...){
+        apply(mat.x, 1, function(j, ...){
+          round(calcCo(i, j, ...), 2)
+        }, ...)
+      }, rand=TRUE)
+    })
+  } else {
+    co.mat <- apply(mat.x, 1, function(i, ...){
+      apply(mat.x, 1, function(j, ...){
+        round(calcCo(i, j, ...), 2)
+      }, ...)
+    }, rand=FALSE)
+  }
+  co.mat
+}
+
+getTransMats <- function(co.mat){
+  .getTM <- function(co.mat){
+    lapply(seq_along(chrs)[-1], function(chr.idx){
+      chr.id1 <- paste0(chrs[chr.idx-1], "_")
+      chr.id2 <- paste0(chrs[chr.idx], "_")
+      
+      co.mat[grep(chr.id2, colnames(co.mat)),
+             grep(chr.id1, rownames(co.mat))]
+    })
+  }
+  if(is.list(co.mat)) lapply(co.mat, .getTM) else .getTM(co.mat)
+}
+
+compChrCo <- function(tm, tn, thresh=c(0.33, 0.66)){
+  lapply(seq_along(tm), function(chr.idx){
+    dims <- dim(tm[[chr.idx]])
+    tm.res <- sapply(1:dims[1], function(r.idx){
+      sapply(1:dims[2], function(c.idx){
+        null.vals <- sapply(tn, function(each.tn){
+          each.tn[[chr.idx]][r.idx, c.idx]
+        })
+        hi <- quantile(null.vals, thresh[2])
+        lo <- quantile(null.vals, thresh[1])
+        
+        co.val <- tm[[chr.idx]][r.idx,c.idx]
+        if(co.val >= lo & co.val <= hi){
+          "random"
+        } else if(co.val > hi){
+          "positive"
+        } else {
+          "negative"
+        }
+      })
+    })
+    
+    tm.res <- t(tm.res)
+    colnames(tm.res) <- colnames(tm[[chr.idx]])
+    rownames(tm.res) <- rownames(tm[[chr.idx]])
+    tm.res
+  })
 }
 
 ###################
@@ -541,3 +617,64 @@ loh.cols <- c("black", "grey")
 names(loh.cols) <- c("L", "H")
 sapply(loh.ppms['M1AD'], plotPWM, cols=loh.cols)
 dev.off()
+
+#### Co-occurence Matrix ####
+## Binarize the feature by sample matrix
+lvl <- c("Loss", "Neutral", "Gain") # lvl <- .getLevels(cn.mat)
+lvl.cn.tmp <-lapply(lvl, function(lvl, cn.tmp){
+  cn.tmp[cn.tmp==lvl] <- 1
+  cn.tmp[cn.tmp!= 1] <- 0
+  storage.mode(cn.tmp) <- "numeric"
+  rownames(cn.tmp) <- paste(rownames(cn.tmp), lvl, sep="_")
+  cn.tmp
+}, cn.tmp = cn.spl[['M1AD']])
+lvl.cn.tmp <- do.call("rbind", lvl.cn.tmp)
+
+## Generate an all-by-all feature co-occurence matrix
+co.mat <- genCoMat(lvl.cn.tmp, rand=FALSE)
+null.mats <- genCoMat(lvl.cn.tmp, rand=TRUE) # Bootstraps segments WITHIN a sample
+
+## Generate the transition matrix between chromosomes
+trans.mat <- getTransMats(co.mat)
+trans.nulls <- getTransMats(null.mats)
+
+## Compare the transition matrix to a random null matrix
+sig.trans <- compChrCo(trans.mat, trans.nulls, c(0.33, 0.66))
+
+pdf("~/Desktop/transitionStates.pdf", width = 14, height = 2.5)
+split.screen(c(1, length(sig.trans)+2))
+sapply(seq_along(sig.trans), function(idx){
+  screen(idx+1); par(mar=c(5.1, 0.15, 4.1, 0.15))
+  m <- sig.trans[[idx]]
+  cols <- transColours()
+  for(each.col in seq_along(cols)){
+    m[m==names(cols)[each.col]] <- cols[each.col]
+  }
+  image(matrix(1:9, ncol=3), axes=FALSE, 
+        col=transColours()[t(sig.trans[[idx]])])
+  title(main=paste0(idx, "-", idx+1), line=0.2, cex=0.7)
+  abline(h=c(0.25, 0.75), col="white")
+  abline(v=c(0.25, 0.75), col="white")
+})
+close.screen(all.screens=TRUE);
+dev.off() 
+
+set.seed(1)
+pdf("~/Desktop/legend.pdf", width = 3, height = 3)
+image(matrix(1:9, ncol=3), axes=FALSE,
+      ylab="chrB",
+      col=sample(transColours(), 9, replace = TRUE))
+title(main="A-B", line=0.2, cex=0.7)
+title(xlab="chrA", line=1)
+abline(h=c(0.25, 0.75), col="white")
+abline(v=c(0.25, 0.75), col="white")
+axis(side = 1, at = c(0, 0.5, 1), tick = FALSE,
+     labels=c("Loss", "Neutral", "Gain"), line=-1)
+axis(side = 2, at = c(0, 0.5, 1), tick = FALSE,
+     labels=c("Loss", "Neutral", "Gain"), line=-1, las=2)
+
+plot(0, type='n', axes=FALSE, xlab='', ylab='',
+     xlim=c(0,10), ylim=c(0,3))
+legend(x = 0, y = 3, fill = transColours(), legend = names(transColours()))
+dev.off()
+
