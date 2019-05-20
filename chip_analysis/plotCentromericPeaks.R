@@ -17,6 +17,14 @@ readInWigs <- function(f){
   wig$peak <- round(wig$peak, 1)
   makeGRangesFromDataFrame(wig, keep.extra.columns = TRUE)
 }
+getGroupOnlyGr <- function(r, alt.gr, ov.gr){
+  lapply(chrs, function(chr){
+    ag <- alt.gr[[r]][[chr]]
+    og <- ov.gr[[r]][[chr]]
+    ov.idx <- queryHits(findOverlaps(ag, og))
+    ag[c(1:length(ag))[-ov.idx],]
+  })
+}
 overlapGrWithROI <- function(r, gr){
   print(r)
   # Isolate for "CEN" regions
@@ -545,7 +553,10 @@ control2 <- 'H3Y'
 roi.chr <- lapply(roi, overlapGrWithROI, gr=rpkm.gr) ## RPKM combined
 ctrl.roi.chr <- lapply(roi, overlapGrWithROI, gr=mp.gw[['Control']][['rpkm']]) ## RPKM control
 daxx.roi.chr <- lapply(roi, overlapGrWithROI, gr=mp.gw[['DAXX']][['rpkm']]) ## RPKM daxx
+ctrlO.roi.chr <- lapply(roi, getGroupOnlyGr, alt.gr=ctrl.roi.chr, ov.gr=roi.chr)
+daxxO.roi.chr <- lapply(roi, getGroupOnlyGr, alt.gr=daxx.roi.chr, ov.gr=roi.chr)
 names(daxx.roi.chr) <- names(ctrl.roi.chr) <- names(roi.chr) <- roi
+names(daxxO.roi.chr) <- names(ctrlO.roi.chr) <- roi
 
 #### ROI Enrichment ####
 ### Checks to see if the centromeric regions are enriched in peaks (RPKM or Max Height)
@@ -556,7 +567,6 @@ len.mat <- sapply(roi.chr, function(i) sapply(i, length))
 rpkm.roi <- runROIpipeline(rpkm.gr, roi.chr, grps) # reduced.esize, reduced.Dsize
 ctrl.rpkm.roi <- runROIpipeline(mp.gw[['Control']][['rpkm']], ctrl.roi.chr, "*") # reduced.esize, reduced.Dsize
 daxx.rpkm.roi <- runROIpipeline(mp.gw[['DAXX']][['rpkm']], daxx.roi.chr, "*") # reduced.esize, reduced.Dsize
-
 
 #### Collapse t-statistics ####
 # Collapses the t-test values between Control and Daxx overlapping peaks
@@ -628,9 +638,9 @@ plotScatPlotCor(data.frame(missegregateChr(), cen.len[1:23,'qcen1']),
 dev.off()
 
 ## Correlation of CENPA expression to missegregation rate
-.averageRpkm <-function(rc){ log2(mean(rowMeans(as.matrix(elementMetadata(rc)))))}
-daxx.rpkm <- sapply(daxx.roi.chr, function(r) sapply(r, .averageRpkm))
-ctrl.rpkm <- sapply(ctrl.roi.chr, function(r) sapply(r, .averageRpkm))
+.averageRpkm <-function(rc){ log2(mean(rowMeans2(as.matrix(elementMetadata(rc)))))}
+daxx.rpkm <- sapply(daxxO.roi.chr, function(r) sapply(r, .averageRpkm))
+ctrl.rpkm <- sapply(ctrlO.roi.chr, function(r) sapply(r, .averageRpkm))
 daxx.ctrl.rpkm <- sapply(roi.chr, function(r) sapply(r, .averageRpkm))
 
 pdf(paste0(project, ".cenpaRPKM.scatterCor.pdf"), width = 5, height = 5)
