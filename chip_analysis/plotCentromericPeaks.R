@@ -10,13 +10,19 @@ require(matrixStats)
 ###################
 #### FUNCTIONS ####
 #Preprocessing functions
-readInWigs <- function(f){
+readInWigs <- function(f, project='Sturgill_CENPA-DAXX'){
   wig <- read.table(f, header=FALSE, stringsAsFactors = FALSE, 
                     check.names=FALSE, sep="\t")
-  colnames(wig) <- c("chr", "start", "end", "peak")
-  wig$peak <- round(wig$peak, 1)
+  if(project=='Sturgill_CENPA-DAXX'){
+    colnames(wig) <- c("chr", "start", "end", "peak")
+    wig$peak <- round(wig$peak, 1)
+  } else if(project=='Nechemia'){
+    colnames(wig) <- c("chr", "start", "end", "macs", "peak")
+    wig$peak <- round(wig$peak, 0)
+  }
+  
   makeGRangesFromDataFrame(wig, keep.extra.columns = TRUE)
-}
+} # Main
 getGroupOnlyGr <- function(r, alt.gr, ov.gr){
   lapply(chrs, function(chr){
     ag <- alt.gr[[r]][[chr]]
@@ -25,7 +31,7 @@ getGroupOnlyGr <- function(r, alt.gr, ov.gr){
     ag[c(1:length(ag))[-ov.idx],]
   })
 }
-overlapGrWithROI <- function(r, gr){
+overlapGrWithROI <- function(r, gr, grps){
   print(r)
   # Isolate for "CEN" regions
   ov <- findOverlaps(gr, cb[which(cb$CEN == r)])
@@ -54,7 +60,7 @@ overlapGrWithROI <- function(r, gr){
   })
   names(gr.chrs) <- chrs
   gr.chrs
-}
+} # Main
 
 
 getCENidx <- function(cb, spread=1){
@@ -213,6 +219,7 @@ reduceROIenrichment <- function(grps, all.esize, t='fishers'){
                       "avg"=Reduce('+', all.esize[idx]) / length(idx),
                       "fishers"=fishers.sumlog(all.esize[idx]))
     red.mat[len.mat < 2] <- NA
+    rownames(red.mat) <- gsub("\\..*$", "", rownames(red.mat))
     red.mat
   }, t=t)  # (t=avg, fishers)
   names(reduced.esize) <- grps
@@ -329,19 +336,23 @@ plotScatPlotCor <- function(comp.df, add=FALSE, text.y=NULL,
 ## RPKM Plots
 # Gets the relative size of each centromere + surrounding regions
 # and returns a scaled down granges with a set bin.size
-getRelativeRoiSize <- function(gr.list, chrs, min.size){
+getRelativeRoiSize <- function(gr.list, chrs, min.size, min.bins=1){
   chr.sizes <- as.data.frame(t(sapply(chrs, function(chr){
     se.pos <- sapply(seq_along(gr.list), function(gr.idx){
       c(min(start(gr.list[[gr.idx]][[chr]])), 
         max(end(gr.list[[gr.idx]][[chr]])))
     })
     se.pos[is.infinite(se.pos)] <- NA
-    c("start"=min(se.pos), "end"=max(se.pos), 
-      "size"=max(se.pos) - min(se.pos))
+    c("start"=min(se.pos, na.rm=TRUE), "end"=max(se.pos, na.rm=TRUE), 
+      "size"=max(se.pos, na.rm=TRUE) - min(se.pos, na.rm=TRUE))
   })))
   
-  chr.sizes[which(chr.sizes$size < min.size),]$size <- min.size
+  if(length(which(chr.sizes$size < min.size)) > 0){
+    chr.sizes[which(chr.sizes$size < min.size),]$size <- min.size
+  } 
+  
   rel.size <- with(chr.sizes, ceiling(1/(min(size, na.rm=TRUE) / size)))
+  if(min(rel.size) < min.bins) rel.size <- (min.bins/min(rel.size)) * rel.size
   chr.sizes$rsize <- rel.size 
   chr.sizes$chr <- rownames(chr.sizes)
   chr.sizes[is.na(chr.sizes)] <- min(chr.sizes$size, na.rm=TRUE)
@@ -366,7 +377,7 @@ getRelativeRoiSize <- function(gr.list, chrs, min.size){
     }
   })
   list("size"=chr.sizes, "bin"=chr.bins)
-}
+}  # Barplot
 # Aggregates the GRanges for the reference bins and the ROI GRanges
 aggGr <- function(chr, gr1, gr2){
   ov <- findOverlaps(gr1[[chr]], gr2[['bin']][[chr]])
@@ -375,7 +386,7 @@ aggGr <- function(chr, gr1, gr2){
   
   spl.meta <- split(as.data.frame(emgr1[queryHits(ov),]), 
                     f=subjectHits(ov))
-  collapse.meta <- lapply(spl.meta, function(i) colMeans2(as.matrix(i)))
+  collapse.meta <- lapply(spl.meta, function(i) colMeans2(as.matrix(i), na.rm = TRUE))
   
   emgr2 <- matrix(nrow=nrow(emgr2), 
                   ncol=ncol(emgr1))
@@ -388,7 +399,7 @@ aggGr <- function(chr, gr1, gr2){
   gr2[['bin']][[chr]]
 }
 # Plots
-plotChrChip <- function(chrs, bin.gr, cols, grp){
+plotChrChip <- function(chrs, bin.gr, cols, grp, ylim=NULL, log=TRUE){
   .drawCen <- function(chr, minstart, maxend, spacer){
     cen.chr <- cb[which(seqnames(cb) == chr & cb$CEN == 'cen'),]
     cen.loc <- c(min(start(cen.chr)), max(end(cen.chr)))
@@ -402,9 +413,11 @@ plotChrChip <- function(chrs, bin.gr, cols, grp){
          col=alpha("grey", 0.2), border=NA)
   }
   
-  plot(0, type='n', xaxt='n', xlab='', ylab='log10(RPKM)',
+  if(is.null(ylim)) ylim <- if(length(grp) == 1) c(0,6) else c(-4,4)
+  plot(0, type='n', xaxt='n', xlab='', 
+       ylab=if(log) 'log10(RPKM)' else "Peak",
        xlim=c(min(bin.size$csize), max(bin.size$csize)), 
-       ylim=if(length(grp) == 1) c(0,6) else c(-4,4))
+       ylim=ylim, cex.axis=0.7)
   axis(side = 1, at = bin.size$csize + (bin.size$size / 2), 
        labels=bin.size$chr, tick = FALSE, las=2, cex.axis=0.7)
   axis(side = 1, at = bin.size$csize, labels=rep("", nrow(bin.size)))
@@ -417,26 +430,25 @@ plotChrChip <- function(chrs, bin.gr, cols, grp){
       ## Run a comparison between groups
       col1.idx <- grep(grp[1], colnames(chr.bins))
       col2.idx <- grep(grp[2], colnames(chr.bins))
-      expr.val <- rowMeans(chr.bins[,col1.idx]) - rowMeans(chr.bins[,col2.idx])
+      expr.val <- rowMeans(chr.bins[,col1.idx], na.rm = TRUE) - rowMeans(chr.bins[,col2.idx], na.rm = TRUE)
       col.idx <- c(col1.idx, col2.idx)
       abline(h = 0, lty=2)
     } else {
       col.idx <- grep(grp[1], colnames(chr.bins))
-      expr.val <- rowMeans(chr.bins[,col.idx])
+      expr.val <- rowMeans(chr.bins[,col.idx], na.rm = TRUE)
     }
     
+    bin.s <- chr.bins$start
+    bin.e <- chr.bins$end
+    .drawCen(chr, min(bin.s), max(bin.e), chr.spacer)
     if(any(!is.na(chr.bins[,col.idx]))){
-      bin.s <- chr.bins$start
-      bin.e <- chr.bins$end
-      .drawCen(chr, min(bin.s), max(bin.e), chr.spacer)
-      
       expr.sign <- integer(length = length(expr.val))
       expr.sign[which(expr.val > 0)] <- 1
       expr.sign[which(expr.val < 0)] <- -1
       rpkm.df <- data.frame(x1=(bin.s - min(bin.s) + chr.spacer), 
                             x2=(bin.e - min(bin.s) + chr.spacer), 
                             y1=0, 
-                            y2=expr.sign * log10(abs(expr.val)))
+                            y2=if(log) {expr.sign * log10(abs(expr.val))} else {expr.val})
       with(rpkm.df, rect(xleft = x1, ybottom = y1, 
                          xright = x2, ytop = y2, 
                          border=NA, col=cols[1]))        
@@ -448,101 +460,168 @@ plotChrChip <- function(chrs, bin.gr, cols, grp){
 #### Setup ChIP Data ####
 daxx.col <- '#e7298a'
 control.col <- '#a6761d'
+endo.col <- '#e7298a'
+elev.col <- '#a6761d'
 
-p <- '1'
-project <- switch(p,
-                  "1"="Sturgill_CENPA-DAXX",
-                  "2"="Hake_chipseq_daxx")
-grps <- c("Control", "DAXX")
+.getProj <- function(p=NULL){
+  if(is.null(p)){
+    print(data.frame('p'=1:3, 'project'=c("Sturgill_CENPA", "Hake_chipseq_daxx", "Nechemia")))
+  } else {
+    project <- switch(p,
+                      "1"="Sturgill_CENPA-DAXX",
+                      "2"="Hake_chipseq_daxx",
+                      "3"="Nechemia")
+    grps <- switch(p, 
+                   "1"=c("Control", "DAXX"),
+                   "2"=c("Control", "DAXX"),
+                   "3"=c("TAP", "LAP"))
+    dir <- switch(p, 
+                  "1"=paste0("/mnt/work1/users/pughlab/projects/NET-SEQ/external_data/", project, "/wig"),
+                  "2"=NULL,
+                  "3"="/mnt/work1/users/pughlab/projects/NET-SEQ/external_data/Nechemia-Arbely_chipCENPa/GSE111381")
+    list("project"=project, "grps"=grps, "dir"=dir)
+  }
+}
+timing <- c("G1", "G2", "RC")
 
-PDIR <- paste0("/mnt/work1/users/pughlab/projects/NET-SEQ/external_data/", project, "/wig")
-setwd(PDIR)
 chrs <- paste0("chr", c(1:22, "X", "Y"))
 
 ##############
 #### MAIN ####
-if(project == 'Sturgill_CENPA-DAXX'){
-  readcnt <- read.table("sturgil_reads.csv", sep=",", header=TRUE,
-                        stringsAsFactors = FALSE)
-  readcnt$grp <- gsub("^si", "", readcnt$Condition)
-  readcnt$rep <- gsub("^.*_", "", readcnt$Experiment)
-  read.spl <- split(readcnt, f=readcnt$gr)
-}
-
-
 cbl <- getCENidx(hg19.cytobands, spread=1)
 cb <- cbl[['cb']]; roi <- cbl[['roi']]
 
-files <- list.files(PDIR, pattern="wig$")
-if(file.exists("wig_gr.Rdata")){
-  print(paste0("Loading pre-existing ", project, " data structure..."))
-  load("wig_gr.Rdata")
-} else {
-  print(paste0("Generating ", project, " GRanges object..."))
+proj <- .getProj(3)
+if(proj[['project']] == 'Nechemia'){
+  PDIR = proj[['dir']]; setwd(PDIR)
+  
+  
   ## Read in each bedgraph file for each file
-  wig.gr <- lapply(files, readInWigs)
+  files <- list.files(PDIR, pattern="MACS")
+  wig.gr <- lapply(files, readInWigs, project=proj[['project']])
   names(wig.gr) <- files
   
-  mpfiles <- list.files("../", pattern="merged_replicated")
-  mp.gw <- lapply(grps, function(grp){
-    read.grp <- read.spl[[grp]]
-    
+  nech.gw <- lapply(proj[['grps']], function(grp){
     ## Rename the wig files based on replicate name
     grp.gr <- wig.gr[grep(grp, names(wig.gr), ignore.case=TRUE)]
     names(grp.gr) <- names(grp.gr) %>% 
-      gsub("^.*_Rep", "Rep", ., ignore.case=TRUE) %>%
-      gsub("_.*", "", .)
+      gsub("^.*_MACS_", "", ., ignore.case=TRUE) %>%
+      gsub(".bed.*", "", .)
     
-    ## Load in the predefined merged peaks bed file
-    f <- mpfiles[grep(grp, mpfiles, ignore.case=TRUE)]
-    merged.peaks <- read.table(file.path("..", f), header=FALSE, sep="\t",
-                               stringsAsFactors = FALSE)
-    colnames(merged.peaks) <- c("chr", "start", "end", "range")
-    gr <- makeGRangesFromDataFrame(merged.peaks)
-    
-    ## Overlap each of the replicates with the merged peaks
-    adj.grp.gr <- lapply(names(grp.gr), function(repl){
-      g.gr <- grp.gr[[repl]]
-      treads <- read.grp[with(read.grp, rep == repl), 'Total.reads']
+    ## Combine Replicates for timings
+    timing.rep.gr <- lapply(timing, function(tim){
+      grp.idx <- grep(tim, names(grp.gr))
+      if(length(grp.idx) > 0){
+        rep.gr <- grp.gr[grp.idx]
+        rep.gr <- lapply(rep.gr, function(tim.gr){
+          tim.gr <- tim.gr[seqnames(tim.gr) %in% chrs,]
+          seqlevels(tim.gr) <- chrs
+          tim.gr[,2]
+        })
+        tim.rep.gr <- aggregateGr(rep.gr)
+        colnames(elementMetadata(tim.rep.gr)) <- paste0("peak", gsub("^.*-", "", names(rep.gr)))
+        
+        ov.peak <- which(!is.na(tim.rep.gr$peak1) | !is.na(tim.rep.gr$peak2))
+        tim.rep.gr[ov.peak,]
+      }
       
-      ov <- findOverlaps(g.gr, gr)
-      split.ov <- split(ov, f=subjectHits(ov))
-      max.pk <- sapply(split.ov, function(s.ov) max(g.gr[queryHits(s.ov),]$peak))
-      gr$peak <- round((max.pk / treads) * 10000000, 1)
-      
-      gr$rpkm <- sapply(split.ov, function(s.ov) rpkm(seg.gr=g.gr[queryHits(s.ov),],
-                                                      treads=treads))
-
-      gr
     })
-    names(adj.grp.gr) <- names(grp.gr) 
-    
-    ## Aggregate the GR: Max peaks/RPKM
-    peaks.gr <- aggregateGr(lapply(adj.grp.gr, function(i) i[,1]))
-    peaks.gr <- peaks.gr[-which(is.na(peaks.gr[,1]$peak)),]
-    colnames(elementMetadata(peaks.gr)) <- names(adj.grp.gr)
-    
-    rpkm.gr <- aggregateGr(lapply(adj.grp.gr, function(i) i[,2]))
-    rpkm.gr <- rpkm.gr[-which(is.na(rpkm.gr[,1]$rpkm)),]
-    colnames(elementMetadata(rpkm.gr)) <- names(adj.grp.gr)
-    
-    list("peaks"=peaks.gr, "rpkm"=rpkm.gr)
+    names(timing.rep.gr) <- timing
+    timing.rep.gr
   })
-  names(mp.gw) <- grps
+  names(nech.gw) <- proj[['grps']]
   
-  .aggregateAndCleanGR <- function(grp){
-    grp.gr <- aggregateGr(lapply(mp.gw, function(i) i[[grp]]))
-    grp.gr <- grp.gr[-which(apply(elementMetadata(grp.gr), 1, 
-                                      function(i) any(is.na(i)))),]
-    colnames(elementMetadata(grp.gr)) <- paste0(sort(rep(grps, 4)), "_",
-                                                  colnames(elementMetadata(grp.gr)))
-    grp.gr
-  }
-  peaks.gr <- .aggregateAndCleanGR('peaks')
-  rpkm.gr <- .aggregateAndCleanGR('rpkm')
-  
-  save(rpkm.gr, peaks.gr, mp.gw, file="wig_gr.Rdata")
+  endog1.roi.chr <- lapply(roi, overlapGrWithROI, gr=nech.gw[['LAP']][['G1']], grps=proj[['grps']]) ## G1 endogenous
+  endog2.roi.chr <- lapply(roi, overlapGrWithROI, gr=nech.gw[['LAP']][['G2']], grps=proj[['grps']]) ## G2 endogenous
+  elevg1.roi.chr <- lapply(roi, overlapGrWithROI, gr=nech.gw[['TAP']][['G1']], grps=proj[['grps']]) ## G1 elevated
+  elevg2.roi.chr <- lapply(roi, overlapGrWithROI, gr=nech.gw[['TAP']][['G2']], grps=proj[['grps']]) ## G2 elevated
+  elevRC.roi.chr <- lapply(roi, overlapGrWithROI, gr=nech.gw[['TAP']][['RC']], grps=proj[['grps']]) ## G2 elevated
 }
+
+proj <- .getProj(1)
+if(proj[['project']] == 'Sturgill_CENPA-DAXX'){
+  PDIR = proj[['dir']]; setwd(PDIR)
+  project = proj[['project']]
+  
+  ## Read in metadata csv
+  readcnt <- read.table("sturgil_reads.csv", sep=",", 
+                        header=TRUE, stringsAsFactors = FALSE)
+  readcnt$grp <- gsub("^si", "", readcnt$Condition)
+  readcnt$rep <- gsub("^.*_", "", readcnt$Experiment)
+  read.spl <- split(readcnt, f=readcnt$gr)
+
+  files <- list.files(proj[['dir']], pattern="wig$")
+  if(file.exists("wig_gr.Rdata")){
+    print(paste0("Loading pre-existing ", proj[['project']], " data structure..."))
+    load("wig_gr.Rdata")
+  } else {
+    print(paste0("Generating ", project, " GRanges object..."))
+    ## Read in each bedgraph file for each file
+    wig.gr <- lapply(files, readInWigs)
+    names(wig.gr) <- files
+    
+    mpfiles <- list.files("../", pattern="merged_replicated")
+    mp.gw <- lapply(proj[['grps']], function(grp){
+      read.grp <- read.spl[[grp]]
+      
+      ## Rename the wig files based on replicate name
+      grp.gr <- wig.gr[grep(grp, names(wig.gr), ignore.case=TRUE)]
+      names(grp.gr) <- names(grp.gr) %>% 
+        gsub("^.*_Rep", "Rep", ., ignore.case=TRUE) %>%
+        gsub("_.*", "", .)
+      
+      ## Load in the predefined merged peaks bed file
+      f <- mpfiles[grep(grp, mpfiles, ignore.case=TRUE)]
+      merged.peaks <- read.table(file.path("..", f), header=FALSE, sep="\t",
+                                 stringsAsFactors = FALSE)
+      colnames(merged.peaks) <- c("chr", "start", "end", "range")
+      gr <- makeGRangesFromDataFrame(merged.peaks)
+      
+      ## Overlap each of the replicates with the merged peaks
+      adj.grp.gr <- lapply(names(grp.gr), function(repl){
+        g.gr <- grp.gr[[repl]]
+        treads <- read.grp[with(read.grp, rep == repl), 'Total.reads']
+        
+        ov <- findOverlaps(g.gr, gr)
+        split.ov <- split(ov, f=subjectHits(ov))
+        max.pk <- sapply(split.ov, function(s.ov) max(g.gr[queryHits(s.ov),]$peak))
+        gr$peak <- round((max.pk / treads) * 10000000, 1)
+        
+        gr$rpkm <- sapply(split.ov, function(s.ov) rpkm(seg.gr=g.gr[queryHits(s.ov),],
+                                                        treads=treads))
+  
+        gr
+      })
+      names(adj.grp.gr) <- names(grp.gr) 
+      
+      ## Aggregate the GR: Max peaks/RPKM
+      peaks.gr <- aggregateGr(lapply(adj.grp.gr, function(i) i[,1]))
+      peaks.gr <- peaks.gr[-which(is.na(peaks.gr[,1]$peak)),]
+      colnames(elementMetadata(peaks.gr)) <- names(adj.grp.gr)
+      
+      rpkm.gr <- aggregateGr(lapply(adj.grp.gr, function(i) i[,2]))
+      rpkm.gr <- rpkm.gr[-which(is.na(rpkm.gr[,1]$rpkm)),]
+      colnames(elementMetadata(rpkm.gr)) <- names(adj.grp.gr)
+      
+      list("peaks"=peaks.gr, "rpkm"=rpkm.gr)
+    })
+    names(mp.gw) <- proj[['grps']]
+    
+    .aggregateAndCleanGR <- function(grp){
+      grp.gr <- aggregateGr(lapply(mp.gw, function(i) i[[grp]]))
+      grp.gr <- grp.gr[-which(apply(elementMetadata(grp.gr), 1, 
+                                        function(i) any(is.na(i)))),]
+      colnames(elementMetadata(grp.gr)) <- paste0(sort(rep(grps, 4)), "_",
+                                                    colnames(elementMetadata(grp.gr)))
+      grp.gr
+    }
+    peaks.gr <- .aggregateAndCleanGR('peaks')
+    rpkm.gr <- .aggregateAndCleanGR('rpkm')
+    
+    save(rpkm.gr, peaks.gr, mp.gw, file="wig_gr.Rdata")
+  }
+}
+
 
 #### Map RPKM to ROI ####
 control <- switch(p,
@@ -550,12 +629,12 @@ control <- switch(p,
                   "2"="H33")
 if(p == '1') gr <- rpkm.gr
 control2 <- 'H3Y'
-roi.chr <- lapply(roi, overlapGrWithROI, gr=rpkm.gr) ## RPKM combined
-ctrl.roi.chr <- lapply(roi, overlapGrWithROI, gr=mp.gw[['Control']][['rpkm']]) ## RPKM control
-daxx.roi.chr <- lapply(roi, overlapGrWithROI, gr=mp.gw[['DAXX']][['rpkm']]) ## RPKM daxx
-ctrlO.roi.chr <- lapply(roi, getGroupOnlyGr, alt.gr=ctrl.roi.chr, ov.gr=roi.chr)
-daxxO.roi.chr <- lapply(roi, getGroupOnlyGr, alt.gr=daxx.roi.chr, ov.gr=roi.chr)
+roi.chr <- lapply(roi, overlapGrWithROI, gr=rpkm.gr, grps=proj[['grps']]) ## RPKM combined
+ctrl.roi.chr <- lapply(roi, overlapGrWithROI, gr=mp.gw[['Control']][['rpkm']], grps=proj[['grps']]) ## RPKM control
+daxx.roi.chr <- lapply(roi, overlapGrWithROI, gr=mp.gw[['DAXX']][['rpkm']], grps=proj[['grps']]) ## RPKM daxx
 names(daxx.roi.chr) <- names(ctrl.roi.chr) <- names(roi.chr) <- roi
+ctrlO.roi.chr <- sapply(roi, getGroupOnlyGr, alt.gr=ctrl.roi.chr, ov.gr=roi.chr)
+daxxO.roi.chr <- lapply(roi, getGroupOnlyGr, alt.gr=daxx.roi.chr, ov.gr=roi.chr)
 names(daxxO.roi.chr) <- names(ctrlO.roi.chr) <- roi
 
 #### ROI Enrichment ####
@@ -564,9 +643,16 @@ names(daxxO.roi.chr) <- names(ctrlO.roi.chr) <- roi
 # against the total background distribution (i.e. all RPKM across entire genome)
 # Then combines D-values as average, or p-values using the Fishers method
 len.mat <- sapply(roi.chr, function(i) sapply(i, length))
-rpkm.roi <- runROIpipeline(rpkm.gr, roi.chr, grps) # reduced.esize, reduced.Dsize
+rpkm.roi <- runROIpipeline(rpkm.gr, roi.chr, grps=proj[['grps']]) # reduced.esize, reduced.Dsize
 ctrl.rpkm.roi <- runROIpipeline(mp.gw[['Control']][['rpkm']], ctrl.roi.chr, "*") # reduced.esize, reduced.Dsize
 daxx.rpkm.roi <- runROIpipeline(mp.gw[['DAXX']][['rpkm']], daxx.roi.chr, "*") # reduced.esize, reduced.Dsize
+
+len.mat <- sapply(endog1.roi.chr, function(i) sapply(i, length))
+endog1.peak.roi <- runROIpipeline(nech.gw[['LAP']][['G1']],  endog1.roi.chr, "*")
+endog2.peak.roi <- runROIpipeline(nech.gw[['LAP']][['G2']],  endog2.roi.chr, "*")
+elevg1.peak.roi <- runROIpipeline(nech.gw[['TAP']][['G1']],  elevg1.roi.chr, "*")
+elevg2.peak.roi <- runROIpipeline(nech.gw[['TAP']][['G2']],  elevg2.roi.chr, "*")
+elevRC.peak.roi <- runROIpipeline(nech.gw[['TAP']][['RC']],  elevRC.roi.chr, "*")
 
 #### Collapse t-statistics ####
 # Collapses the t-test values between Control and Daxx overlapping peaks
@@ -581,14 +667,14 @@ split.chrs <- lapply(split(lohChr(), factor(lohChr())), names)
 names(split.chrs) <- c("LOH", "Het")
 loh.cols <- c("#33a02c", "#fb9a99")
 loh.dt <- do.call("rbind", lapply(roi, function(r){
-  tmp <- clusterEnrichment(control.mat, tstat.mat, r=r,
+  tmp <- clusterEnrichment(ctrl.rpkm.roi[['D']], tstat.mat, r=r,
                     ord=split.chrs, cols=loh.cols)
   if(r!='cen') tmp$pch <- 1
   tmp
 }))
 
 # Visualization
-pdf(paste0(project, ".enrichBox.pdf"), width = 5, height = 5)
+pdf(paste0(proj[['project']], ".enrichBox.pdf"), width = 5, height = 5)
 plot(D~t, data=loh.dt, col=loh.dt$cols, pch=loh.dt$pch, 
      xlim=c(-1.5, 1.5), ylim=c(0,0.7), main="LOH/Het chr", 
      ylab="CENPA enrichment (D)", xlab="DAXX-KO CENPA change (t)")
@@ -606,7 +692,7 @@ ctrl.cnt <- sapply(ctrl.roi.chr, function(r) sapply(r, length))
 daxx.cnt <- sapply(daxx.roi.chr, function(r) sapply(r, length))
 cenpa.diff <- rowDiffs(cbind(ctrl.cnt[,idx], daxx.cnt[,idx]))
 
-pdf(paste0(project, ".numPeaks.scatterCor.pdf"), width = 5, height = 5)
+pdf(paste0(proj[['project']], ".numPeaks.scatterCor.pdf"), width = 5, height = 5)
 idx='cen'
 comp.df <- data.frame(missegregateChr(), daxx.cnt[1:23,idx])
 text.y <- plotScatPlotCor(comp.df, add=FALSE, col=alpha(control.col, 0.7), 
@@ -621,7 +707,7 @@ plotScatPlotCor(comp.df, add=TRUE, col=alpha("black", 0.7), pch=17,
 dev.off()
 
 ## Correlation of centromere size with missegregation rate
-pdf(paste0(project, ".cenSize.scatterCor.pdf"), width = 5, height = 5)
+pdf(paste0(proj[['project']], ".cenSize.scatterCor.pdf"), width = 5, height = 5)
 cen.len <- sapply(roi, function(r) {
   cb.tmp <- cb[which(cb$CEN == r)]
   sapply(split(cb.tmp, f=seqnames(cb.tmp)), function(i){
@@ -643,7 +729,7 @@ daxx.rpkm <- sapply(daxxO.roi.chr, function(r) sapply(r, .averageRpkm))
 ctrl.rpkm <- sapply(ctrlO.roi.chr, function(r) sapply(r, .averageRpkm))
 daxx.ctrl.rpkm <- sapply(roi.chr, function(r) sapply(r, .averageRpkm))
 
-pdf(paste0(project, ".cenpaRPKM.scatterCor.pdf"), width = 5, height = 5)
+pdf(paste0(proj[['project']], ".cenpaRPKM.scatterCor.pdf"), width = 5, height = 5)
 text.y <- plotScatPlotCor(data.frame(missegregateChr(), daxx.rpkm[1:23,'cen']), 
                           add=FALSE, col=alpha(daxx.col, 0.7), 
                           pch=16, id='siRNA DAXX',
@@ -669,18 +755,33 @@ all.roi.chr <- sapply(chrs, .combineROI, gr=roi.chr)
 all.ctrl.roi.chr <- sapply(chrs, .combineROI, gr=ctrl.roi.chr)
 all.daxx.roi.chr <- sapply(chrs, .combineROI, gr=daxx.roi.chr)
 
+all.endog1.roi.chr <- sapply(chrs, .combineROI, gr=endog1.roi.chr)
+all.endog2.roi.chr <- sapply(chrs, .combineROI, gr=endog2.roi.chr)
+all.elevg1.roi.chr <- sapply(chrs, .combineROI, gr=elevg1.roi.chr)
+all.elevg2.roi.chr <- sapply(chrs, .combineROI, gr=elevg2.roi.chr)
+all.elevRC.roi.chr <- sapply(chrs, .combineROI, gr=elevRC.roi.chr)
+
 # Create a reference bin set of a set bin-size
-gr.list <- list(all.roi.chr, all.ctrl.roi.chr, all.daxx.roi.chr)
-gr.ref.bins <- getRelativeRoiSize(gr.list, chrs, min.size=500000)
+gr.list <- list(all.roi.chr, all.ctrl.roi.chr, all.daxx.roi.chr,
+                all.endog1.roi.chr, all.endog2.roi.chr, 
+                all.elevg1.roi.chr, all.elevg2.roi.chr,
+                all.elevRC.roi.chr)
+gr.ref.bins <- getRelativeRoiSize(gr.list, chrs, min.size=50000, min.bins = 10)
 
 # Overlap RPKM gr with the reference bins
 bin.roi.chr <- sapply(chrs, aggGr, gr1=all.roi.chr, gr2=gr.ref.bins)
 bin.ctrl.chr <- sapply(chrs, aggGr, gr1=all.ctrl.roi.chr, gr2=gr.ref.bins)
 bin.daxx.chr <- sapply(chrs, aggGr, gr1=all.daxx.roi.chr, gr2=gr.ref.bins)
 
+bin.endog1.chr <- sapply(chrs, aggGr, gr1=all.endog1.roi.chr, gr2=gr.ref.bins)
+bin.endog2.chr <- sapply(chrs, aggGr, gr1=all.endog2.roi.chr, gr2=gr.ref.bins)
+bin.elevg1.chr <- sapply(chrs, aggGr, gr1=all.elevg1.roi.chr, gr2=gr.ref.bins)
+bin.elevg2.chr <- sapply(chrs, aggGr, gr1=all.elevg2.roi.chr, gr2=gr.ref.bins)
+bin.elevRC.chr <- sapply(chrs, aggGr, gr1=all.elevRC.roi.chr, gr2=gr.ref.bins)
+
 bin.size <- gr.ref.bins[['size']]
 
-pdf(paste0(project, ".bars.pdf"), width = 10, height = 3.5)
+pdf(paste0(proj[['project']], ".bars.pdf"), width = 10, height = 3)
 plotChrChip(chrs=chrs, bin.gr=bin.daxx.chr, 
             col=daxx.col, grp='Rep')
 plotChrChip(chrs=chrs, bin.gr=bin.ctrl.chr, 
@@ -688,6 +789,17 @@ plotChrChip(chrs=chrs, bin.gr=bin.ctrl.chr,
 plotChrChip(chrs=chrs, bin.gr=bin.roi.chr, 
             col="black", 
             grp=c('DAXX', 'Control'))
+
+plotChrChip(chrs=chrs, bin.gr=bin.endog1.chr, 
+            cols=endo.col, grp='peak', ylim=c(0,100), log=FALSE)
+plotChrChip(chrs=chrs, bin.gr=bin.endog2.chr, 
+            cols=endo.col, grp='peak', ylim=c(0,100), log=FALSE)
+plotChrChip(chrs=chrs, bin.gr=bin.elevg1.chr, 
+            cols=elev.col, grp='peak', ylim=c(0,100), log=FALSE)
+plotChrChip(chrs=chrs, bin.gr=bin.elevg2.chr, 
+            cols=elev.col, grp='peak', ylim=c(0,100), log=FALSE)
+plotChrChip(chrs=chrs, bin.gr=bin.elevRC.chr, 
+            cols=elev.col, grp='peak', ylim=c(0,100), log=FALSE)
 dev.off()
 
 
