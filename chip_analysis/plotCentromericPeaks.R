@@ -76,8 +76,11 @@ getCENidx <- function(cb, spread=1){
     q.cen.idx <- setdiff((qcen.idx + each.spread), qcen.idx)
     
     # Remove cytobands not on the same chromosomes as their corresponding centromere
+    p.cen.idx[p.cen.idx < 1] <- length(cb)
     rm.idx <- as.character(seqnames(cb[pcen.idx,])) == as.character(seqnames(cb[p.cen.idx,]))
     if(any(!rm.idx)) p.cen.idx <- p.cen.idx[-which(!rm.idx)]
+    
+    q.cen.idx[q.cen.idx > length(cb)] <- 1
     rm.idx <- as.character(seqnames(cb[qcen.idx,])) == as.character(seqnames(cb[q.cen.idx,]))
     if(any(!rm.idx)) q.cen.idx <- q.cen.idx[-which(!rm.idx)]
     
@@ -306,9 +309,11 @@ clusterEnrichment <- function(control.mat, tstat.mat, r='cen',
                           't'=unlist(em.cen.dt[['t']]),
                           'grp'=rep(names(em.cen.dt[['D']]), 
                                     sapply(em.cen.dt[['D']], length)))
-  em.cen.dt$cols <- cols[as.integer(factor(em.cen.dt$grp))]
-  em.cen.dt$pch <- 16
-  em.cen.dt$chr <- gsub("^.*\\.", "", rownames(em.cen.dt))
+  if(nrow(em.cen.dt) > 0){
+    em.cen.dt$cols <- cols[as.integer(factor(em.cen.dt$grp))]
+    em.cen.dt$pch <- 16
+    em.cen.dt$chr <- gsub("^.*\\.", "", rownames(em.cen.dt))
+  }
   em.cen.dt
 }
 
@@ -460,8 +465,8 @@ plotChrChip <- function(chrs, bin.gr, cols, grp, ylim=NULL, log=TRUE){
 #### Setup ChIP Data ####
 daxx.col <- '#e7298a'
 control.col <- '#a6761d'
-endo.col <- '#e7298a'
-elev.col <- '#a6761d'
+endo.col <- '#1b9e77'
+elev.col <- '#666666' #'#666666'
 
 .getProj <- function(p=NULL){
   if(is.null(p)){
@@ -624,11 +629,10 @@ if(proj[['project']] == 'Sturgill_CENPA-DAXX'){
 
 
 #### Map RPKM to ROI ####
-control <- switch(p,
-                  "1"="Control",
-                  "2"="H33")
-if(p == '1') gr <- rpkm.gr
-control2 <- 'H3Y'
+#if(p == '1') gr <- rpkm.gr
+cbl <- getCENidx(hg19.cytobands, spread=1)
+cb <- cbl[['cb']]; roi <- cbl[['roi']]
+
 roi.chr <- lapply(roi, overlapGrWithROI, gr=rpkm.gr, grps=proj[['grps']]) ## RPKM combined
 ctrl.roi.chr <- lapply(roi, overlapGrWithROI, gr=mp.gw[['Control']][['rpkm']], grps=proj[['grps']]) ## RPKM control
 daxx.roi.chr <- lapply(roi, overlapGrWithROI, gr=mp.gw[['DAXX']][['rpkm']], grps=proj[['grps']]) ## RPKM daxx
@@ -647,6 +651,14 @@ rpkm.roi <- runROIpipeline(rpkm.gr, roi.chr, grps=proj[['grps']]) # reduced.esiz
 ctrl.rpkm.roi <- runROIpipeline(mp.gw[['Control']][['rpkm']], ctrl.roi.chr, "*") # reduced.esize, reduced.Dsize
 daxx.rpkm.roi <- runROIpipeline(mp.gw[['DAXX']][['rpkm']], daxx.roi.chr, "*") # reduced.esize, reduced.Dsize
 
+.redMat <- function(x){
+  if(is.list(x)) x <- x[[1]]
+  x[,-which(apply(x, 2, function(i) all(is.na(i))))]
+}
+lapply(rpkm.roi, .redMat)
+lapply(ctrl.rpkm.roi, .redMat)
+lapply(daxx.rpkm.roi, .redMat)
+
 len.mat <- sapply(endog1.roi.chr, function(i) sapply(i, length))
 endog1.peak.roi <- runROIpipeline(nech.gw[['LAP']][['G1']],  endog1.roi.chr, "*")
 endog2.peak.roi <- runROIpipeline(nech.gw[['LAP']][['G2']],  endog2.roi.chr, "*")
@@ -657,21 +669,27 @@ elevRC.peak.roi <- runROIpipeline(nech.gw[['TAP']][['RC']],  elevRC.roi.chr, "*"
 #### Collapse t-statistics ####
 # Collapses the t-test values between Control and Daxx overlapping peaks
 # using Fishers method for p, or average/sd for t-stat
-t.mat <- reduceTtest(roi.chr, 'p')
+t.mat <- .redMat(reduceTtest(roi.chr, 'p'))
 tstat.mat <- reduceTtest(roi.chr, 'stat')
-tstat.sd.mat <- reduceTtest(roi.chr, 'stat.sd')
+tstat.mat[is.nan(tstat.mat)] <- NA
+tstat.sd.mat <- .redMat(reduceTtest(roi.chr, 'stat.sd'))
 
 #### EM clusters of enrichment ####
 # split chromosomes based on LOH or Het
 split.chrs <- lapply(split(lohChr(), factor(lohChr())), names)
 names(split.chrs) <- c("LOH", "Het")
+split.chrs <- split(missegregateChr(), missegregateChr() > 0.168)
+split.chrs <- lapply(split.chrs, function(i) names(i))
+names(split.chrs) <- c("LOH", "Het")
 loh.cols <- c("#33a02c", "#fb9a99")
-loh.dt <- do.call("rbind", lapply(roi, function(r){
-  tmp <- clusterEnrichment(ctrl.rpkm.roi[['D']], tstat.mat, r=r,
+loh.list <- lapply(roi, function(r){
+  tmp <- clusterEnrichment(ctrl.rpkm.roi[['D']][[1]], tstat.mat, r=r,
                     ord=split.chrs, cols=loh.cols)
-  if(r!='cen') tmp$pch <- 1
+  if(r!='cen' & nrow(tmp) > 0) tmp$pch <- 1
   tmp
-}))
+})
+names(loh.list) <- roi
+loh.dt <- do.call("rbind", loh.list)
 
 # Visualization
 pdf(paste0(proj[['project']], ".enrichBox.pdf"), width = 5, height = 5)
@@ -809,6 +827,224 @@ dev.off()
 
 
 
+
+
+
+
+#### Test Space ####
+
+#DAXX-null induces loss of CENPA deposition;
+rpkm.chr <- lapply(chrs, function(chr){rpkm.gr[seqnames(rpkm.gr) == chr,]})
+rpkm.chr <- lapply(rpkm.chr, function(chr.gr){
+  em.chr <- as.data.frame(elementMetadata(chr.gr))
+  
+  grps = proj[['grps']]
+  grp1.idx <- grep(grps[1], colnames(em.chr)) 
+  grp2.idx <- grep(grps[2], colnames(em.chr)) 
+  stats <- round(apply(em.chr, 1, function(i) t.test(i[grp1.idx], i[grp2.idx])$statistic),3)
+  p <- round(apply(em.chr, 1, function(i) t.test(i[grp1.idx], i[grp2.idx])$p.value),3)
+  
+  elementMetadata(chr.gr) <- data.frame("stat"=stats, "p"=p)
+  chr.gr
+})
+cor.test(sapply(rpkm.chr, function(i) mean(i$stat))[1:22],
+         missegregateChr()[1:22])
+cor.test(sapply(rpkm.chr, function(i) median(i$stat))[1:22],
+         missegregateChr()[1:22])
+cor.test(sapply(rpkm.chr, function(i) sum(i$stat))[1:22],
+         missegregateChr()[1:22])
+x <- sapply(rpkm.chr, function(i) max(i$stat, na.rm=TRUE))[1:22]
+x[is.infinite(x)] <- NA
+cor.test(x, missegregateChr()[1:22])
+
+
+#Levels of CENPA deposition; 
+rpkm.chr <- lapply(chrs, function(chr){rpkm.gr[seqnames(rpkm.gr) == chr,]})
+rpkm.chr <- lapply(rpkm.chr, function(chr.gr){
+  em.chr <- as.matrix(elementMetadata(chr.gr))
+  
+  rpkm.mu <- sapply(proj[['grps']], function(grp){
+    grp.idx <- grep(grp, colnames(em.chr)) 
+    rowMeans2(em.chr[,grp.idx, drop=FALSE])
+  })
+  if(class(rpkm.mu) == 'numeric') rpkm.mu <- t(rpkm.mu)
+  if(is.list(rpkm.mu)) c(NA,NA) else colMaxs(rpkm.mu)
+})
+apply(do.call(rbind, rpkm.chr)[1:22,], 2, function(i){
+  cor.test(i, missegregateChr()[1:22], use = "complete.obs")
+})
+
+#Expression of the new (DAXX) CENPA depositions across entire chromosome
+ov <- findOverlaps(rpkm.gr,
+                   mp.gw[['DAXX']][['rpkm']])
+only.idx <- c(1:length(mp.gw[['DAXX']][['rpkm']]))[-subjectHits(ov)]
+daxx.rpkm.gr <- mp.gw[['DAXX']][['rpkm']][only.idx,]
+
+rpkm.chr <- lapply(chrs, function(chr){daxx.rpkm.gr[seqnames(daxx.rpkm.gr) == chr,]})
+rpkm.chr <- lapply(rpkm.chr, function(chr.gr){
+  em.chr <- as.matrix(elementMetadata(chr.gr))
+  
+  rpkm.mu <- rowMeans2(em.chr[drop=FALSE])
+  
+  c(mean(rpkm.mu, na.rm=TRUE),
+    max(rpkm.mu, na.rm=TRUE),
+    median(rpkm.mu, na.rm=TRUE),
+    sum(rpkm.mu, na.rm=TRUE))
+})
+rpkm.chr <- do.call(rbind, rpkm.chr)[1:22,]
+rpkm.chr[is.infinite(rpkm.chr)] <- NA
+apply(rpkm.chr, 2, function(x){
+  cor.test(x, missegregateChr()[1:22], use = "complete.obs")
+})
+
+
+#Expression of the old CENPA depositions across entire chromosome
+ov <- findOverlaps(rpkm.gr,
+                   mp.gw[['Control']][['rpkm']])
+only.idx <- c(1:length(mp.gw[['Control']][['rpkm']]))[-subjectHits(ov)]
+ctrl.rpkm.gr <- mp.gw[['Control']][['rpkm']][only.idx,]
+
+rpkm.chr <- lapply(chrs, function(chr){ctrl.rpkm.gr[seqnames(ctrl.rpkm.gr) == chr,]})
+rpkm.chr <- lapply(rpkm.chr, function(chr.gr){
+  em.chr <- as.matrix(elementMetadata(chr.gr))
+  
+  rpkm.mu <- rowMeans2(em.chr[drop=FALSE])
+  
+  c(mean(rpkm.mu, na.rm=TRUE),
+    max(rpkm.mu, na.rm=TRUE),
+    median(rpkm.mu, na.rm=TRUE),
+    sum(rpkm.mu, na.rm=TRUE))
+})
+rpkm.chr <- do.call(rbind, rpkm.chr)[1:22,]
+rpkm.chr[is.infinite(rpkm.chr)] <- NA
+apply(rpkm.chr, 2, function(x){
+  cor.test(x, missegregateChr()[1:22], use = "complete.obs")
+})
+
+#Expression of all (DAXX) CENPA depositions across entire chromosome; (CTRL)
+daxx.rpkm.gr = mp.gw[['DAXX']][['rpkm']]
+
+rpkm.chr <- lapply(chrs, function(chr){daxx.rpkm.gr[seqnames(daxx.rpkm.gr) == chr,]})
+rpkm.chr <- lapply(rpkm.chr, function(chr.gr){
+  em.chr <- as.matrix(elementMetadata(chr.gr))
+  
+  rpkm.mu <- rowMeans2(em.chr[drop=FALSE])
+  
+  c(mean(rpkm.mu, na.rm=TRUE),
+    max(rpkm.mu, na.rm=TRUE),
+    median(rpkm.mu, na.rm=TRUE),
+    sum(rpkm.mu, na.rm=TRUE))
+})
+rpkm.chr <- do.call(rbind, rpkm.chr)[1:22,]
+rpkm.chr[is.infinite(rpkm.chr)] <- NA
+apply(rpkm.chr, 2, function(x){
+  cor.test(x, missegregateChr()[1:22], use = "complete.obs")
+})
+
+# Expression of all (Ctrl) CENPA depositions across entire chromosome
+ctrl.rpkm.gr = mp.gw[['Control']][['rpkm']]
+
+rpkm.chr <- lapply(chrs, function(chr){ctrl.rpkm.gr[seqnames(ctrl.rpkm.gr) == chr,]})
+rpkm.chr <- lapply(rpkm.chr, function(chr.gr){
+  em.chr <- as.matrix(elementMetadata(chr.gr))
+  
+  rpkm.mu <- rowMeans2(em.chr[drop=FALSE])
+  
+  c(mean(rpkm.mu, na.rm=TRUE),
+    max(rpkm.mu, na.rm=TRUE),
+    median(rpkm.mu, na.rm=TRUE),
+    sum(rpkm.mu, na.rm=TRUE))
+})
+rpkm.chr <- do.call(rbind, rpkm.chr)[1:22,]
+rpkm.chr[is.infinite(rpkm.chr)] <- NA
+apply(rpkm.chr, 2, function(x){
+  cor.test(x, missegregateChr()[1:22], use = "complete.obs")
+})
+
+#####################################
+#### Ranks of centromeric levels ####
+plotDiagCorMat <- function(cor.mat, add=FALSE, 
+                           xloc=1.5, y.scale=1){
+  cor.dim <- dim(cor.mat)
+  vals <- round(cor.mat[lower.tri(cor.mat)], 2) * 100 - 50
+  cols <- colorRampPalette(c("grey", "black"))(50)
+  
+  .rotMat <- function(d){
+    .deg2rad <- function(d){d * (pi / 180)}
+    theta <- .deg2rad(theta)
+    
+    round(matrix(c(cos(theta), -1 * sin(theta), 
+                   sin(theta), cos(theta)),
+                 nrow=2,byrow = TRUE), 2)
+  }
+  .diagBox <- function(){
+    x=c(0, 1, 1, 0)
+    y=c(0, 0, 1, 1)
+    box <- matrix(c(x, y), byrow = FALSE, ncol=2)
+    diag <- box %*% .rotMat(45)
+    sc <- 1 / max(diag[,1])
+    diag <- diag * sc
+    list("d"=diag, "scale"=sc)
+  }
+  
+  pos.mat <- which(lower.tri(cor.mat), arr.ind=TRUE)
+  df <- pos.mat %*%  .rotMat(45) * .diagBox()[['scale']]
+  df[,1] <- df[,1] - min(df[,1]) + xloc
+  df[,2] <- (df[,2] - min(df[,2]) + 1) * y.scale
+  diag <- .diagBox()[['d']] 
+  diag[,2] <- diag[,2] * y.scale
+  
+  if(!add) plot(0, type='n', xlim=c(0.5, ncol(cor.mat)), 
+                ylim=c(0.5, ncol(cor.mat)))
+  sapply(1:nrow(df), function(idx){
+    i=df[idx,]
+    polygon(x = diag[,1] + i[1], y = diag[,2]+ i[2], 
+            col=cols[vals[idx]], border="white")
+  })
+}
+summChrCen <- function(gr.l){
+  lapply(gr.l, function(gr){
+    emgr <- as.matrix(elementMetadata(gr))
+    rowMeans2(emgr, na.rm=TRUE)
+  })
+}
+testChr <- function(mu.chr){
+  Q = unlist(mu.chr)
+  sapply(mu.chr, function(P){
+    tryCatch({
+      #ks.test(P, Q)$p.value
+      round(t.test(P, Q)$statistic,3)
+    }, error=function(e) {NA})
+  })
+}
+
+cen.mat <- cbind(as.matrix(testChr(summChrCen(endog1.roi.chr[[2]]))),
+                 as.matrix(testChr(summChrCen(endog2.roi.chr[[2]]))),
+                 as.matrix(testChr(summChrCen(elevg1.roi.chr[[2]]))),
+                 as.matrix(testChr(summChrCen(elevg2.roi.chr[[2]]))),
+                 as.matrix(testChr(summChrCen(elevRC.roi.chr[[2]]))))
+ranks <- apply(cen.mat, 2, rank)
+ranks.cor <- apply(ranks, 2, function(i){
+  apply(ranks, 2, function(j){
+    round(cor(i, j, method = "pearson", use = 'complete.obs'), 3)
+  })
+})
+
+plot(0, type='n', xaxt='n', yaxt='n', xlab='', ylab='', axes=FALSE,
+     xlim=c(0.5, ncol(ranks)), ylim=c(1, nrow(ranks) + 3))
+chr <- gsub("chr", "", rownames(ranks)) %>% gsub(".t", "", .)
+plotDiagCorMat(ranks.cor, add=TRUE, xloc=0.85, y.scale=1.5)
+sapply(1:ncol(ranks), function(c.idx){
+  if(c.idx != 1){
+    dif <- abs(ranks[,c.idx-1] - ranks[,c.idx]) + 1
+    dif <- rescale(dif, c(0.5, 1.5))
+    segments(x0 = c.idx-1, y0 = ranks[,c.idx-1] + 4.5, 
+             x1 = c.idx - 0.3, y1 = ranks[,c.idx] + 4.5,
+             lwd = 2 * dif)
+  }
+  text(x=c.idx, y=ranks[,c.idx] + 4.5, labels=chr, pos=2, 
+       col=if(c.idx < 3) endo.col else elev.col)
+})
 
 
 
