@@ -1,6 +1,7 @@
 library(taRifx) #remove.factors
 library(scales)
 library(ltm)
+library(plyr)
 require(gglogo)
 
 ###################
@@ -141,7 +142,7 @@ addRect <- function(inds, cols, ylim=c(0,2)){
   })
 }
 
-fixSeg <- function(seg){
+fixSeg <- function(seg, each.disease='x'){
   seg$modal_A1 <- rmFactor(seg$modal_A1)
   seg$Chromosome <- as.character(seg$Chromosome)
   seg$LOH <- rmFactor(seg$LOH)
@@ -219,25 +220,45 @@ getTransMats <- function(co.mat){
   if(is.list(co.mat)) lapply(co.mat, .getTM) else .getTM(co.mat)
 }
 
-compChrCo <- function(tm, tn, thresh=c(0.33, 0.66)){
+compChrCo <- function(tm, tn, thresh=c(0.33, 0.66), 
+                      use.quant=TRUE, discretize=TRUE){
   lapply(seq_along(tm), function(chr.idx){
     dims <- dim(tm[[chr.idx]])
     tm.res <- sapply(1:dims[1], function(r.idx){
       sapply(1:dims[2], function(c.idx){
         null.vals <- sapply(tn, function(each.tn){
-          each.tn[[chr.idx]][r.idx, c.idx]
+          if(length(tm) == 1){
+            each.tn[r.idx, c.idx]
+          } else {
+            each.tn[[chr.idx]][r.idx, c.idx]
+          }
+          
         })
-        hi <- quantile(null.vals, thresh[2])
-        lo <- quantile(null.vals, thresh[1])
+        if(use.quant){
+          hi <- quantile(null.vals, thresh[2])
+          lo <- quantile(null.vals, thresh[1])
+        } else {
+          hi <- median(null.vals) + (mad(null.vals) * thresh)
+          lo <- median(null.vals) - (mad(null.vals) * thresh)
+        }
+        
         
         co.val <- tm[[chr.idx]][r.idx,c.idx]
-        if(co.val >= lo & co.val <= hi){
-          "random"
-        } else if(co.val > hi){
-          "positive"
+        if(discretize){
+          if(lo == hi){
+            "negative"
+          } else if(co.val >= lo & co.val <= hi){
+            "random"
+          } else if(co.val > hi){
+            "positive"
+          } else {
+            "negative"
+          }
         } else {
-          "negative"
+          if(lo == hi) null.vals <- c(500, 1000)
+          round(ecdf(null.vals)(co.val),2) * 100
         }
+        
       })
     })
     
@@ -259,7 +280,7 @@ load("~/git/net-seq/cgh_analysis/data/genie_mut.Rdata")
 disease.list[['genie']] <- genie.cn_ord
 
 out.dir <- file.path("/mnt/work1/users/pughlab/projects/NET-SEQ/loh_signature/plots", "loh_plots")
-out.dir <- '~/Desktop'
+out.dir <- '~/Desktop/netseq/fig1_molProfile'
 dir.create(out.dir)
 
 only.loh <- FALSE # Set to FALSE if you want to plot nonLOH CN too
@@ -270,7 +291,17 @@ sp <- 0.005
 sp1 <- 0.5
 chr.cex <- 0.7
 
-bisir <- biserial.cor(missegregateChr()[-23], as.integer(factor(lohChr())))
+cn.signature <- paste0("chr", c(paste0(c(1:3), "_Loss"),
+                                paste0(c(4:5), "_Gain"),
+                                paste0(c(6), "_Loss"),
+                                paste0(c(7), "_Gain"),
+                                paste0(c(8), "_Loss"),
+                                paste0(c(9), "_Gain"),
+                                paste0(c(10:11), "_Loss"),
+                                paste0(c(12:14), "_Gain"),
+                                paste0(c(15:16), "_Loss"),
+                                paste0(c(17:20), "_Gain"),
+                                paste0(c(21:22), "_Loss")))
 
 ######################
 #### Plotting LOH ####
@@ -407,7 +438,7 @@ for(each.disease in names(disease.list)){
       } else {
         ## Plot individual sample LOH per chromosome
         seg <- disease.list[[each.disease]][[disease.idx]]
-        seg <- fixSeg(seg) # Sets CNt, length, and standardizes Chr name
+        seg <- fixSeg(seg, each.disease=each.disease) # Sets CNt, length, and standardizes Chr name
         
         gen.loh[[disease.idx]] <- sum(seg[which(seg$LOH==1),]$length) / total.genome.size
         if(each.disease == 'genie') gen.loh[[disease.idx]] <- 0
@@ -455,10 +486,8 @@ for(each.disease in names(disease.list)){
   dev.off()
 }
 
-#############
-#### PWM ####
-l=1:5
-
+###################
+#### PWM: Functions ####
 assignGroupIds <- function(mtbl, ids=NULL){
   mut.map <- c("MEN1"="M1", "DAXX"="D", "ATRX"="A", "TP53"="T")
   mut <- apply(mtbl, 2, function(i){
@@ -473,7 +502,7 @@ assignGroupIds <- function(mtbl, ids=NULL){
   }
   mut
 }
-assignChromCnStat <- function(seg, stat){
+assignChromCnStat <- function(seg, stat, chr.thresh=0.6){
   .isWholeInt <- function(x){as.numeric(x)%%1==0}
   seg <- remove.factors(seg)
   seg <- fixSeg(seg)
@@ -581,6 +610,8 @@ getPpm <- function(mat, lvl){
   mat.ppm
 }
 
+###################
+#### PWM: Main ####
 rownames(mut.table) <- mut.table$Genes
 loh.grp.ids <- assignGroupIds(mut.table[,-1])
 loh.mad.ids <- assignGroupIds(mut.table[,-1], c('M1', 'A', 'D'))
@@ -605,14 +636,14 @@ cn.ppms <- lapply(cn.spl, getPpm, lvl=.getLevels(cn.mat))
 cn.loh.ppms <- lapply(cn.loh.spl, getPpm, lvl=.getLevels(cn.mat))
 loh.ppms <- lapply(loh.spl, getPpm, lvl=.getLevels(loh.mat))
 
-pdf("~/Desktop/cn-bits.pdf", width=8, height=3)
+pdf(file.path(out.dir, "cn-bits.pdf"), width=8, height=3)
 cn.cols <- lohColours()
 names(cn.cols) <- c("x", "L", "N", "G", "y")
 sapply(cn.ppms[c(1, length(cn.ppms))], plotPWM, cols=cn.cols)
 sapply(cn.loh.ppms[c(1, length(cn.loh.ppms))], plotPWM, cols=cn.cols)
 dev.off()
 
-pdf("~/Desktop/loh-bits.pdf", width=8, height=3)
+pdf(file.path(out.dir, "loh-bits.pdf"), width=8, height=3)
 loh.cols <- c("black", "grey")
 names(loh.cols) <- c("L", "H")
 sapply(loh.ppms['M1AD'], plotPWM, cols=loh.cols)
@@ -641,8 +672,42 @@ trans.nulls <- getTransMats(null.mats)
 
 ## Compare the transition matrix to a random null matrix
 sig.trans <- compChrCo(trans.mat, trans.nulls, c(0.33, 0.66))
+sig.co <- compChrCo(list(co.mat), null.mats, thresh=1, 
+                    use.quant = FALSE, discretize = FALSE)
 
-pdf("~/Desktop/transitionStates.pdf", width = 14, height = 2.5)
+pdf(file.path(out.dir, "large_transition_mat.pdf"), width=40, height=10)
+split.screen(c(1,4))
+grps <- c("self", "Loss", "Neutral", "Gain")
+sapply(grps, function(cn.change){
+  screen(grep(cn.change, grps)); par(mar=c(6, 6, 4.1, 2.1))
+  if(cn.change=='self'){
+    cn.signature.comp <- cn.signature
+  } else {
+    cn.signature.comp <- paste0("chr", c(1:22), "_", cn.change)
+  }
+  sub.sig.co <- sig.co[[1]][cn.signature, cn.signature.comp]
+  
+  m <- sub.sig.co
+  cols <- transColours()
+  cols.ramp <- colorRampPalette(rev(cols[c(1,rep(2,3),3)]))(101)
+  for(each.col in seq_along(cols)){
+    m[m==names(cols)[each.col]] <- cols[each.col]
+  }
+  image(x=c(1:dim(m)[1]), y=c(1:dim(m)[2]),
+        z=t(sub.sig.co), axes=FALSE, 
+        col=cols.ramp, breaks=c(0:101),
+        ylab='', xlab='', sub=cn.change)
+  #cols=transColours()[t(sub.sig.co)]
+  abline(h=seq(0.5, dim(m)[1]+0.5, by=1), col="white")
+  abline(v=seq(0.5, dim(m)[1]+0.5, by=1), col="white")
+  
+  axis(side=1, at=c(1:22), labels = gsub("_.*", "", colnames(m)), las=2)
+  axis(side=2, at=c(1:22), labels = rownames(m), las=1)
+})
+close.screen(all.screens=TRUE); dev.off()
+
+
+pdf(file.path(out.dir, "transitionStates.pdf"), width = 14, height = 2.5)
 split.screen(c(1, length(sig.trans)+2))
 sapply(seq_along(sig.trans), function(idx){
   screen(idx+1); par(mar=c(5.1, 0.15, 4.1, 0.15))
@@ -661,7 +726,7 @@ close.screen(all.screens=TRUE);
 dev.off() 
 
 set.seed(1)
-pdf("~/Desktop/legend.pdf", width = 3, height = 3)
+pdf(file.path(out.dir, "transitionLegend.pdf"), width = 3, height = 3)
 image(matrix(1:9, ncol=3), axes=FALSE,
       ylab="chrB",
       col=sample(transColours(), 9, replace = TRUE))
@@ -679,3 +744,30 @@ plot(0, type='n', axes=FALSE, xlab='', ylab='',
 legend(x = 0, y = 3, fill = transColours(), legend = names(transColours()))
 dev.off()
 
+
+################
+#### Legend ####
+cols <- transColours()
+colfunc <- colorRampPalette(rev(cols[c(1,rep(2,3),3)]))
+legend_image <- rev(as.raster(matrix(colfunc(101), ncol=1)))
+pdf(file.path(out.dir, "cooccur-legend.pdf"), width=3, height=6)
+plot(c(0,4),c(0,1),type = 'n', axes = F,xlab = '', ylab = '')
+text(x=1.2, y = seq(0,1,by=0.2), labels = seq(0,1,by=0.2), cex=0.7, adj=0)
+text(x=1.9, y = c(0, 0.5, 1.0), labels = c("Mutually exclusive", "Random", "Co-occur"), adj=0, cex=0.7)
+rasterImage(legend_image, 0, 0, 1,1)
+dev.off()
+
+
+cn.cols <- lohColours()
+names(cn.cols) <- c("x", "L", "N", "G", "y")
+mut.col <- mutColours()
+
+pdf(file.path(out.dir, "legend.pdf"))
+plot(0, type='n', xlim=c(1,10), ylim=c(1,10), axes=FALSE, xlab="", ylab="")
+legend("topleft", fill=unlist(mut.col)[1:5], 
+       legend = c("Insertion", "Deletion", "Nonsense", "Missense", "Splice"), 
+       border = 0, box.lwd = 0)
+legend("topright", fill=c(cn.cols[2:4], alpha(cn.cols[2:4], 0.1)), 
+       legend = rep(c("Loss", "Neutral", "Gain"), 2), 
+       border = 0, box.lwd = 0, ncol=2)
+dev.off()
