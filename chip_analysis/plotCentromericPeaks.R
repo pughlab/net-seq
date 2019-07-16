@@ -1201,15 +1201,33 @@ summary(model)
 #### Barplot Misseg/LOH ####
 proj <- .getProj(1)
 
-pdf(file.path(proj$dir, "missegLoh.pdf"), height=5, width=10)
-split.screen(c(2,1))
-screen(1); par(mar=c(1.1, 4.1, 5.1, 2.1))
-bp <- barplot(missegregateChr(), col=1, las=1, xaxt='n')
-abline(v = c(bp-0.5, bp+0.5), col="grey", lty=2)
 
-screen(2); par(mar=c(8.1, 4.1, 0, 2.1))
-barplot(as.integer(lohChr()[1:23]=='black'), col=1, las=1, yaxt='n')
-abline(v = c(bp-0.5, bp+0.5), col="grey", lty=2)
-axis(side = 1, at = bp, c(1:22, "X"), las=1, cex=0.7, tick = FALSE)
-close.screen(all.screens=TRUE)
+misseg.spl <- split(missegregateChr()[1:22], 
+                    f=lohChr()[1:22] == 'black')
+names(misseg.spl) <- c("Het", "LOH")
+
+pch.size <- 3
+
+bs <- beeswarm(misseg.spl, do.plot = TRUE, cex=pch.size)
+bs$chr <- gsub("^.*chr", "", rownames(bs))
+chr.cols <- colorRampPalette(c("#ffffb2", "#fd8d3c"))(nrow(bs))
+bs$fill <- chr.cols[as.integer(bs$chr)]
+
+pdf(file.path(proj$dir, "missegLoh.pdf"), width = 10)
+plot(0, type='n', xlim=c(0, 1), ylim=c(0.5, 2.5), 
+     xaxt='n', yaxt='n', xlab='Missegregation fraction', 
+     ylab='', axes=FALSE)
+points(x=bs$y, y=bs$x, pch=16, cex=pch.size, col=bs$fill)
+points(x=bs$y, y=bs$x, cex=pch.size)
+text(x=bs$y, y=bs$x, cex=1, labels = bs$chr)
+axis(side=1, at=seq(0,1,by=0.2), labels=seq(0,1,by=0.2))
+axis(side=2, at=c(1,2), labels=c("Het", "LOH"), las=1, tick = FALSE)
+legend("topright", box.lwd = 0,
+         legend=paste0("biserial corr = ", 
+                       round(abs(with(bs, biserial.cor(y.orig, x.orig))),2)))
+legend_image <- as.raster(matrix(chr.cols, nrow=1))
+rasterImage(legend_image, 0.8, 0.5, 1, 0.6)
+text(x=0.82, y=0.55, labels = "Chr: 1", adj=1)
+text(x=0.9, y=0.55, labels = "...")
+text(x=0.98, y=0.55, labels = "X", adj=0)
 dev.off()
