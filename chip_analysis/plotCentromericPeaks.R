@@ -6,6 +6,7 @@ library(scales)
 library(metap)
 library(mclust)
 require(matrixStats)
+library(ltm)
 
 ###################
 #### FUNCTIONS ####
