@@ -468,6 +468,9 @@ control.col <- '#a6761d'
 endo.col <- '#1b9e77'
 elev.col <- '#666666' #'#666666'
 
+## IMPORTANT: Sets all the paths and parameters for the run
+# Sturgill_CENPA (Nye dataset): GSE120230 Requires bigwig files and convert to wig
+# Nechemia: GSE111381 requires bed.gz files
 .getProj <- function(p=NULL){
   if(is.null(p)){
     print(data.frame('p'=1:3, 'project'=c("Sturgill_CENPA", "Hake_chipseq_daxx", "Nechemia")))
@@ -946,11 +949,15 @@ ctrlO.loss <- round(fracCov(chr.ctrlO.gr, chr.size), 2)
 names(chr.rpkm.gr) <- chrs
 rpkm.retained.c <- sapply(chr.rpkm.gr, function(i) sum(width(i)))
 
+pdf(file.path(proj$dir, "distOfGainedCENPA.pdf"), height=8, width=4)
 barplot((rbind(rpkm.retained.c, 
               ctrlO.loss.c,
               daxxO.gain.c)/ 1000)[,rev(chrs)], 
         col=c("#999999", "#67a9cf", "#ef8a62"),
         horiz=TRUE, las=1)
+legend("bottomright", fill = c("#999999", "#67a9cf", "#ef8a62"), 
+       legend = c("Retained", "Control-only", "DAXX-only"), box.lwd = 0)
+dev.off()
 
 ####################
 #### Test Space ####
@@ -1062,37 +1069,6 @@ y <- y / chr.size
 y[y==0] <- NA
 cor.test(y[1:22], missegregateChr()[1:22])
 
-
-# #DAXX-null induces loss of CENPA deposition;
-# rpkm.chr <- lapply(chr.rpkm.gr, function(chr.gr){
-#   em.chr <- as.data.frame(elementMetadata(chr.gr))
-#   
-#   grps = proj[['grps']]
-#   grp1.idx <- grep(grps[1], colnames(em.chr)) 
-#   grp2.idx <- grep(grps[2], colnames(em.chr)) 
-#   stats <- round(apply(em.chr, 1, function(i) t.test(i[grp1.idx], i[grp2.idx])$statistic),3)
-#   p <- round(apply(em.chr, 1, function(i) t.test(i[grp1.idx], i[grp2.idx])$p.value),3)
-#   
-#   elementMetadata(chr.gr) <- data.frame("stat"=stats, "p"=p)
-#   chr.gr
-# })
-# cor.test(sapply(rpkm.chr, function(i) mean(i$stat))[1:22],
-#          missegregateChr()[1:22])
-# cor.test(sapply(rpkm.chr, function(i) median(i$stat))[1:22],
-#          missegregateChr()[1:22])
-# cor.test(sapply(rpkm.chr, function(i) sum(i$stat))[1:22],
-#          missegregateChr()[1:22])
-# x <- sapply(rpkm.chr, function(i) max(i$stat, na.rm=TRUE))[1:22]
-# x[is.infinite(x)] <- NA
-# cor.test(x, missegregateChr()[1:22])
-
-
-
-
-
-
-
-
 cor.est <- matrix(c(testChrExpr(summarizeChrExpr(endog1.roi.chr[[2]]))['median'],
                     testChrExpr(summarizeChrExpr(endog2.roi.chr[[2]]))['median'],
                     testChrExpr(summarizeChrExpr(elevg1.roi.chr[[2]]))['median'],
@@ -1198,7 +1174,7 @@ data <- distRpkm(chr.ctrl.gr)
 data <- distRpkm(chr.ctrlO.gr)
 data <- distRpkm(chr.rpkm.gr)
 
-pdf("distRpkm.pdf", height = 4, width = 7)
+pdf(file.path(proj$dir, "distRpkm.pdf"), height = 4, width = 7)
 my_palette <- colorRampPalette(c("#fc8d59", "#ffffbf", "#91bfdb"))
 lapply(list(chr.rpkm.gr, chr.daxxO.gr, chr.ctrlO.gr), function(i){
   data <- distRpkm(i, ord=TRUE)
@@ -1220,3 +1196,20 @@ summary(model)
 
 
 
+
+############################
+#### Barplot Misseg/LOH ####
+proj <- .getProj(1)
+
+pdf(file.path(proj$dir, "missegLoh.pdf"), height=5, width=10)
+split.screen(c(2,1))
+screen(1); par(mar=c(1.1, 4.1, 5.1, 2.1))
+bp <- barplot(missegregateChr(), col=1, las=1, xaxt='n')
+abline(v = c(bp-0.5, bp+0.5), col="grey", lty=2)
+
+screen(2); par(mar=c(8.1, 4.1, 0, 2.1))
+barplot(as.integer(lohChr()[1:23]=='black'), col=1, las=1, yaxt='n')
+abline(v = c(bp-0.5, bp+0.5), col="grey", lty=2)
+axis(side = 1, at = bp, c(1:22, "X"), las=1, cex=0.7, tick = FALSE)
+close.screen(all.screens=TRUE)
+dev.off()
