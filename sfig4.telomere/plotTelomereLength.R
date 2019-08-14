@@ -1,6 +1,6 @@
 library(scales)
 
-telomere <- read.table("~/Onedrive/PughLab/NET-seq/telomere/allTelbamLengths.csv", 
+telomere <- read.table("~/Onedrive - UHN/PughLab/NET-seq/telomere/allTelbamLengths.csv", 
                        sep=",", header=TRUE, stringsAsFactors = FALSE)
 head(telomere)
 telomere$Sample <- gsub("_02_.*", "", telomere$Sample)
@@ -34,6 +34,9 @@ points(1, log10(telo.spl[['PNET']][net29idx,'Length']),
 pval <- t.test(telo.spl[['PNET']]$Length,
                telo.spl[['GINET']]$Length, 
                alternative = "greater")$p.val
+f.pval <- var.test(telo.spl[['PNET']]$Length,
+                   telo.spl[['GINET']]$Length, 
+                   alternative = "greater")$p.val
 text(x = 1.5, y = 5.7, labels = paste0("p = ",
                                        round(pval, 4), 
                                        " (one-sided t-test)"),
@@ -47,4 +50,3 @@ dev.off()
 sapply(colnames(xy[,which(xy['Mean',] > 0.8)]), function(x){
    summary(pnet[['estq']][,x])
 })
-
