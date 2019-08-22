@@ -1,6 +1,6 @@
 library(metafor)
-setwd('~/git/loh_cn_visualize/cgh_plotter/')
-load("~/git/loh_cn_visualize/data/cgh_df.RData")
+setwd('~/git/net-seq/cgh_analysis/cgh_plotter/')
+load("~/git/net-seq/cgh_analysis/data/cgh_df.RData")
 
 specify_decimal <- function(x, k) format(round(x, k), nsmall=k)
 getTableIndices <- function(table.idx){
@@ -187,5 +187,5 @@ text(2, tbl.inf$poly['Title'], "I^2")
 close.screen(all=TRUE)
 dev.off()
 
-save(cgh.contigency.df, file="~/git/loh_cn_visualize/data/cgh.contigency.post_review.Rdata")
+save(cgh.contigency.df, file="~/git/net-seq/cgh_analysis/cgh_plotter/output/cgh.contigency.post_review.Rdata")
  

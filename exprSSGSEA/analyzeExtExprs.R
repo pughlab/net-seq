@@ -8,10 +8,26 @@ library(org.Hs.eg.db)
 require(BSgenome.Hsapiens.UCSC.hg19)
 require(matrixStats)
 require(scales)
-
 require(beeswarm)
+
 ###################
 #### FUNCTIONS ####
+getGeneMat <- function(cor.mat, goi.pattern='CENP'){
+  cenp.genes <- grep(goi.pattern, names(cor.mats[['cor']]))
+  
+  genes <- gsub(".cor", "", rownames(cor.mats[['cor']][[1]]))
+  gene.mat <- lapply(genes, function(g){
+    r.idx <- grep(g, rownames(cor.mats[['cor']][[1]]))
+    sapply(cor.mats[['cor']], function(i) i[r.idx,] )
+  })
+  names(gene.mat) <- genes
+  
+  gene.cenp.mat <- lapply(gene.mat, function(i) i[,cenp.genes])
+  
+  list("all"=gene.mat, "goi"=gene.cenp.mat)
+}
+
+
 cleanMetadata <- function(gsm, meta.file=NULL, group=NULL){
   if(group=='sadanadam'){
     ## Mine the IDs by mixing GSM data with an external worksheet
@@ -153,7 +169,7 @@ compareGoi2Cen <- function(goi, e.gse, expr.spl, core.kin, gen.plot=FALSE){
        "cor"=cor.mats)
 }
 
-genGsc <- function(keyterms, categ='C5', subcat='BP'){
+genGsc <- function(keyterms, categ='C5', subcat=c('CC', 'BP')){
   m = msigdbr(species = "Homo sapiens",
               category=categ, 
               subcategory = subcat)
@@ -226,7 +242,8 @@ mapExprsGeneToLoci <- function(e.gse){
        "anno"=anno.expr.genes[order.idx,])
 }
 
-plotBeeswarmCor <- function(cor.mats, goi, group='core-kinetochore', core.kin){
+plotBeeswarmCor <- function(cor.mats, goi, group='core-kinetochore', 
+                            core.kin, isolate.goi=FALSE, ...){
   mad <- as.data.frame(sapply(goi, function(g, grp){
     sapply(cor.mats[['cor']], function(i) i[paste0(g, ".cor"), grp])
   }, grp='MAD'))
@@ -236,32 +253,42 @@ plotBeeswarmCor <- function(cor.mats, goi, group='core-kinetochore', core.kin){
   }, grp='WT'))
   
   colnames(core.kin) <- c("Symbol", "ID", "group")
-  .annoGeneCor <- function(ds, mad.stat){
+  .annoGeneCor <- function(ds, mad.stat, base.col='black', goi.col="red"){
     ds$Symbol <- rownames(ds)
     ds$mad <- mad.stat
     merge.ds <- merge(ds, core.kin, by="Symbol", all.x=TRUE)
-    merge.ds$color = 'black'
-    merge.ds[grep("CENP", merge.ds$Symbol),'color'] <- 'red'
+    merge.ds$color = base.col
+    merge.ds[grep("CENP", merge.ds$Symbol),'color'] <- goi.col
     merge.ds
   }
-  merged.cor <- rbind(.annoGeneCor(mad, 'MAD'),
-                      .annoGeneCor(wt, 'WT'))
+  merged.cor <- rbind(.annoGeneCor(mad, 'MAD', ...),
+                      .annoGeneCor(wt, 'WT', ...))
   ck.merged.cor <- merged.cor[which(merged.cor$group == group),]
+  if(isolate.goi) ck.merged.cor <- ck.merged.cor[grep("CENP", ck.merged.cor$Symbol),]
+  spl.ck.merged <- split(ck.merged.cor, f=ck.merged.cor$mad)
   
+  .runTtest <- function(gene){
+    p <- round(t.test(spl.ck.merged[['MAD']][,gene], 
+                      spl.ck.merged[['wt']][,gene])$p.value,2)
+    paste("p", if(p==0) p <- "< 0.01" else paste0("= ", p))
+  }
   split.screen(c(1,3))
-  screen(1); par(mar=c(5.1, 4, 4.1, 0.1))
+  screen(1); par(mar=c(5.1, 4, 4.1, 0.3))
   beeswarm(DAXX ~ mad, data=ck.merged.cor,breaks=NA, 
            main='DAXX', ylab='Correlation', xlab='',
-           pwcol=ck.merged.cor$color, pch=16, ylim=c(-0.6, 0.6))
-  screen(2); par(mar=c(5.1, 4, 4.1, 0.1))
+           pwcol=ck.merged.cor$color, pch=16, ylim=c(-0.6, 0.6), las=1)
+  text(x = 1, y=-0.6, labels = .runTtest("DAXX"), pos = 4)
+  screen(2); par(mar=c(5.1, 4, 4.1, 0.3))
   beeswarm(ATRX ~ mad, data=ck.merged.cor,breaks=NA, 
            main='ATRX', ylab='', xlab='', yaxt='n',
            pwcol=ck.merged.cor$color, pch=16, ylim=c(-0.6, 0.6))
+  text(x = 1, y=-0.6, labels = .runTtest("ATRX"), pos = 4)
   axis(side = 2, at=seq(-1, 1, by=0.2), labels = rep("", 11))
-  screen(3); par(mar=c(5.1, 4, 4.1, 0.1))
+  screen(3); par(mar=c(5.1, 4, 4.1, 0.3))
   beeswarm(MEN1 ~ mad, data=ck.merged.cor,breaks=NA, 
            main='MEN1', ylab='', xlab='',  yaxt='n',
            pwcol=ck.merged.cor$color, pch=16, ylim=c(-0.6, 0.6))
+  text(x = 1, y=-0.6, labels = .runTtest("MEN1"), pos = 4)
   axis(side = 2, at=seq(-1, 1, by=0.2), labels = rep("", 11))
   close.screen(all.screens=TRUE)
   
@@ -269,7 +296,7 @@ plotBeeswarmCor <- function(cor.mats, goi, group='core-kinetochore', core.kin){
 
 plotSSGSEA <- function(ssgsea, grp.col){
   orig.go <- rownames(ssgsea)
-  rownames(ssgsea) <- c("CEN", paste0("KIN", 1:4))
+  rownames(ssgsea) <- c("CEN", paste0("KIN", 1:6), paste0("SC", 1:7), "PERI")
   
   idx <- barplot(ssgsea[,1], col=alpha(grp.col, 0.5), 
                  xlim=c(-5, 5), border = NA, las=1,
@@ -344,13 +371,21 @@ plotExprZscore <- function(alt.exprs, ref.exprs,
 ###################
 #### VARIABLES ####
 pdir <- '/mnt/work1/users/pughlab/projects/NET-SEQ/hgu133a2_array_chan/expr_analysis'
-core.file <- '/mnt/work1/users/pughlab/projects/NET-SEQ/external_data/thiru_core-kinetochore/supp_E14-03-0837_mc-E14-03-0837-s01.txt'
+#core.file <- '/mnt/work1/users/pughlab/projects/NET-SEQ/external_data/thiru_core-kinetochore/supp_E14-03-0837_mc-E14-03-0837-s01.txt'
+core.file <- '~/git/net-seq/exprCenpAnalysis/data/supp_E14-03-0837_mc-E14-03-0837-s01.txt'
+
+# Necessary files: GSE73338 series_matrix.txt.gz and family.soft.gz
+path.to.sadanandam <- '/mnt/work1/users/pughlab/projects/NET-SEQ/external_data/Sadanandam_exprArray'
+# Necessary files: GSE117851 series_matrix.txt.gz and family.soft.gz
+path.to.chan <- "/mnt/work1/users/pughlab/projects/NET-SEQ/external_data/Chan-hgu133a2"
+
 core.kin <- read.table(core.file, sep="\t", header=TRUE, 
                        stringsAsFactors = FALSE, check.names = FALSE)
+key.goterms <- c("centromere", "kinetochore", "sister_chromatid", "pericentric")
 
 ###############################
 #### Sadanadam et al, 2015 ####
-setwd("/mnt/work1/users/pughlab/projects/NET-SEQ/external_data/Sadanandam_exprArray")
+setwd(path.to.sadanandam)
 grp.col <- '#d95f02'
 
 ## Load Datasets
@@ -367,13 +402,20 @@ e.gse <- grpExprMat(gse, cl.spl, group='sadanadam', return.tmat = TRUE)
 goi <- c("DAXX", "MEN1", "ATRX")
 cor.mats <- compareGoi2Cen(goi, e.gse, expr.spl[c("MAD", "WT")],
                            core.kin, gen.plot=FALSE)
-pdf(file.path(pdir, "sad_beeswarmcor.pdf"), width = 6, height = 7)
-plotBeeswarmCor(cor.mats, goi, group='core-kinetochore', core.kin)
+gene.mat <- getGeneMat(cor.mats)
+lapply(gene.mat[['all']], function(i) rowMedians(i))
+lapply(gene.mat[['goi']], function(i) rowMedians(i))
+
+pdf(file.path(pdir, "sad_beeswarmcor.pdf"), width = 6, height = 5)
+plotBeeswarmCor(cor.mats, goi, group='core-kinetochore', core.kin, 
+                isolate.goi = TRUE, goi.col="black")
+plotBeeswarmCor(cor.mats, goi, group='core-kinetochore', core.kin, 
+                isolate.goi = FALSE, goi.col="black", base.col="grey")
 dev.off()
 
 ## Generate ssGSEA plots showing disruption of centromeric process
-centromere.gsc <- genGsc(c("centromere", "kinetochore"))
-ssgsea.stats <- grpAndTestSSGSEA(expr.spl[c("MAD", "WT")], centromere.gsc)
+centromere.gsc <- genGsc(key.goterms)
+sad.ssgsea.stats <- grpAndTestSSGSEA(expr.spl[c("MAD", "WT")], centromere.gsc)
 
 pdf(file.path(pdir, "sad_ssgseaMAD.pdf"), width = 6, height = 4)
 plotSSGSEA(ssgsea.stats[['score.test']], grp.col)
@@ -389,7 +431,7 @@ dev.off()
 
 ##########################
 #### Chan et al, 2018 ####
-setwd("/mnt/work1/users/pughlab/projects/NET-SEQ/external_data/Chan-hgu133a2")
+setwd(path.to.chan)
 grp.col <- '#7570b3'
 
 gse=getGEO(filename="GSE117851_series_matrix.txt.gz")
@@ -404,13 +446,20 @@ e.gse <- grpExprMat(gse, cl.spl, group='chan', return.tmat = TRUE)
 goi <- c("DAXX", "MEN1", "ATRX")
 cor.mats <- compareGoi2Cen(goi, e.gse, expr.spl[c("MAD", "WT")],
                            core.kin, gen.plot=FALSE)
-pdf(file.path(pdir, "chan_beeswarmcor.pdf"), width = 6, height = 7)
-plotBeeswarmCor(cor.mats, goi, group='core-kinetochore', core.kin)
+gene.mat <- getGeneMat(cor.mats)
+lapply(gene.mat[['all']], function(i) rowMedians(i, na.rm=TRUE))
+lapply(gene.mat[['goi']], function(i) rowMedians(i, na.rm=TRUE))
+
+pdf(file.path(pdir, "chan_beeswarmcor.pdf"), width = 6, height = 5)
+plotBeeswarmCor(cor.mats, goi, group='core-kinetochore', core.kin, 
+                isolate.goi = TRUE, goi.col="black")
+plotBeeswarmCor(cor.mats, goi, group='core-kinetochore', core.kin, 
+                isolate.goi = FALSE, goi.col="black", base.col="grey")
 dev.off()
 
 ## Generate ssGSEA plots showing disruption of centromeric process
-centromere.gsc <- genGsc(c("centromere", "kinetochore"))
-ssgsea.stats <- grpAndTestSSGSEA(expr.spl[c("MAD", "WT")], centromere.gsc)
+centromere.gsc <- genGsc(key.goterms)
+chan.ssgsea.stats <- grpAndTestSSGSEA(expr.spl[c("MAD", "WT")], centromere.gsc)
 
 pdf(file.path(pdir, "chan_ssgseaMAD.pdf"), width = 6, height = 4)
 plotSSGSEA(ssgsea.stats[['score.test']], grp.col)

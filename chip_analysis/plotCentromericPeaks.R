@@ -627,12 +627,18 @@ if(proj[['project']] == 'Sturgill_CENPA-DAXX'){
     peaks.gr <- .aggregateAndCleanGR('peaks')
     rpkm.gr <- .aggregateAndCleanGR('rpkm')
     
+    # mp.gw: Merged_peaks (previously defined) GRanges peaks for Peak height and RPKM
+    # rpkm.gr: All overlapped and reduced merged_peaks between Control and Daxx grps (RPKM)
+    # peaks.gr: All overlapped and reduced merged_peaks between Control and Daxx grps (Max Peaks)
     save(rpkm.gr, peaks.gr, mp.gw, file="wig_gr.Rdata")
   }
 }
 
 
 #### Map RPKM to ROI ####
+## Maps peaks and summarized peak data to regions of interests (cytobands and centromeres)
+## Also identifies regions that are exclusive to certain groups (i.e. DAXX-only)
+
 #if(p == '1') gr <- rpkm.gr
 cbl <- getCENidx(hg19.cytobands, spread=1)
 cb <- cbl[['cb']]; roi <- cbl[['roi']]
@@ -642,6 +648,8 @@ roi.chr <- lapply(roi, overlapGrWithROI, gr=rpkm.gr, grps=proj[['grps']]) ## RPK
 ctrl.roi.chr <- lapply(roi, overlapGrWithROI, gr=mp.gw[['Control']][['rpkm']], grps=proj[['grps']]) ## RPKM control
 daxx.roi.chr <- lapply(roi, overlapGrWithROI, gr=mp.gw[['DAXX']][['rpkm']], grps=proj[['grps']]) ## RPKM daxx
 names(daxx.roi.chr) <- names(ctrl.roi.chr) <- names(roi.chr) <- roi
+
+#Identify GRanges found exclusively in one group
 ctrlO.roi.chr <- sapply(roi, getGroupOnlyGr, alt.gr=ctrl.roi.chr, ov.gr=roi.chr)
 daxxO.roi.chr <- lapply(roi, getGroupOnlyGr, alt.gr=daxx.roi.chr, ov.gr=roi.chr)
 names(daxxO.roi.chr) <- names(ctrlO.roi.chr) <- roi
@@ -653,7 +661,9 @@ names(daxxO.roi.chr) <- names(ctrlO.roi.chr) <- roi
 # Then combines D-values as average, or p-values using the Fishers method
 proj <- .getProj(1)
 len.mat <- sapply(roi.chr, function(i) sapply(i, length))
+# Peaks found in both Ctrl and Daxx grp
 rpkm.roi <- runROIpipeline(rpkm.gr, roi.chr, grps=proj[['grps']]) # reduced.esize, reduced.Dsize
+# Peaks found in Ctrl or Daxx grp (not exclusive)
 ctrl.rpkm.roi <- runROIpipeline(mp.gw[['Control']][['rpkm']], ctrl.roi.chr, "*") # reduced.esize, reduced.Dsize
 daxx.rpkm.roi <- runROIpipeline(mp.gw[['DAXX']][['rpkm']], daxx.roi.chr, "*") # reduced.esize, reduced.Dsize
 
